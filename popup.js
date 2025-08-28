@@ -8,7 +8,7 @@ const storageGet   = (keys)=>new Promise(res=>chrome.storage.local.get(keys,res)
 const storageSet   = (obj)=>new Promise(res=>chrome.storage.local.set(obj,res));
 const storageRemove= (key)=>new Promise(res=>chrome.storage.local.remove(key,res));
 
-/////  crypto helpers
+/////  crypto helpers 
 function bufToB64(buf){
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }

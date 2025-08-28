@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>TraceGuard</title>
+  <link rel="stylesheet" href="popup.css"/>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>TraceGuard</h1>
+      <button id="lockNowBtn" class="lock-btn" title="Lock vault">🔒</button>
+    </header>
+
+    <!-- CREATE / UNLOCK PANEL -->
+    <div id="lockPanel" class="card">
+      <h2 id="lockTitle">Create a master password</h2>
+
+      <label for="master">Password</label>
+      <input id="master" type="password" placeholder="Enter password"/>
+
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" type="password" placeholder="Confirm password"/>
+
+      <div class="row">
+        <button id="authBtn">Create</button>
+      </div>
+
+      <p class="note">
+        Data is encrypted locally with AES-GCM. If you forget the master password,
+        your data cannot be recovered.
+      </p>
+    </div>
+
+    <!-- MAIN UI -->
+    <div id="mainUI" class="card hidden">
+      <form id="entryForm">
+        <label for="type">Type</label>
+        <select id="type">
+          <option value="phone">Phone</option>
+          <option value="credit">Credit Card</option>
+          <option value="address">Address</option>
+        </select>
+
+        <label for="value">Value</label>
+        <input id="value" type="text" placeholder="Enter phone, card, or address"/>
+
+        <div class="row">
+          <button type="submit">Save (encrypt)</button>
+          <button type="button" id="clearForm" class="secondary">Clear</button>
+        </div>
+      </form>
+
+      <div class="search-area">
+        <input id="search" type="text" placeholder="Filter by type / last4 / site"/>
+      </div>
+
+      <h2>Saved Entries</h2>
+      <div id="entriesList" class="list"></div>
+
+      <p style="margin-top:12px;font-size:11px;text-align:center">
+        <a href="dashboard.html" target="_blank">Open Dashboard →</a>
+      </p>
+    </div>
+
+    <div id="lockedMessage" class="note">Unlock to view/add/search entries.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

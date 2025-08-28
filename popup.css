@@ -1,0 +1,30 @@
+:root{
+  --bg:#ffffff; --text:#0b0b0b; --card:#f7f7fb; --muted:#6b6b6b;
+  --accent:#007aff; --danger:#ff3b30; --btn-text:#fff;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#121214; --text:#eaeaec; --card:#1c1c1e; --muted:#9b9b9f;
+    --accent:#0a84ff; --danger:#ff453a; --btn-text:#fff;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;width:320px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+.container{display:flex;flex-direction:column;gap:12px}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{margin:0;font-size:18px;color:var(--accent)}
+.lock-btn{background:transparent;border:none;color:var(--accent);font-size:16px;cursor:pointer}
+.card{background:var(--card);border-radius:12px;padding:10px;border:1px solid rgba(0,0,0,.04)}
+.hidden{display:none}
+label{font-size:12px;color:var(--muted);display:block;margin-top:6px}
+input[type="text"],input[type="password"],select{width:100%;padding:9px 10px;margin-top:6px;border-radius:10px;border:1px solid rgba(0,0,0,.06);background:transparent;color:var(--text);font-size:14px}
+button{padding:8px 10px;border-radius:10px;border:none;cursor:pointer;font-weight:600;background:var(--accent);color:var(--btn-text)}
+button.secondary{background:transparent;border:1px solid rgba(0,0,0,.08);color:var(--muted);font-weight:600}
+.row{display:flex;gap:8px;margin-top:8px}
+.note{font-size:11px;color:var(--muted);margin-top:8px}
+.list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.entry-card{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:10px;background:rgba(0,0,0,.02)}
+.entry-info{display:flex;flex-direction:column;gap:4px}
+.entry-info .small{font-size:12px;color:var(--muted)}
+.remove{background:var(--danger);color:var(--btn-text);border-radius:8px;padding:6px 8px;border:none}
+.search-area input{width:100%;padding:8px;border-radius:10px;border:1px solid rgba(0,0,0,.06)}

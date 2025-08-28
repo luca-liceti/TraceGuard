@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>TraceGuard Dashboard</title>
+  <link rel="stylesheet" href="popup.css"/>
+  <style>
+    body{max-width:700px;margin:40px auto;padding:0 14px}
+    #resetAll{background:var(--danger);color:#fff;margin-top:20px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TraceGuard Dashboard</h1>
+    <button id="lockDashBtn" class="lock-btn" title="Lock vault">🔒</button>
+  </header>
+
+  <div class="card">
+    <label for="filter">Filter by Type:</label>
+    <select id="filter">
+      <option value="">All</option>
+      <option value="phone">Phone</option>
+      <option value="credit">Credit Card</option>
+      <option value="address">Address</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h2>Entries</h2>
+    <div id="log-list"></div>
+  </div>
+
+  <div style="text-align:center;">
+    <button id="resetAll">⚠️ Reset All Data ⚠️</button>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

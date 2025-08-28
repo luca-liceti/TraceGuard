@@ -10,7 +10,7 @@
   <div class="container">
     <header>
       <h1>TraceGuard</h1>
-      <button id="lockNowBtn" class="lock-btn" title="Lock vault">🔒</button>
+      <button id="lockNowBtn" class="lock-btn" title="Lock vault" style="display: none;">🔓</button>
     </header>
 
     <!-- CREATE / UNLOCK PANEL -->
@@ -36,15 +36,19 @@
     <!-- MAIN UI -->
     <div id="mainUI" class="card hidden">
       <form id="entryForm">
-        <label for="type">Type</label>
+        <label for="type">Information Type</label>
         <select id="type">
-          <option value="phone">Phone</option>
-          <option value="credit">Credit Card</option>
+          <option value="email">Email Address</option>
+          <option value="phone">Phone Number</option>
           <option value="address">Address</option>
+          <option value="ssn">Social Security Number</option>
+          <option value="credit">Credit Card</option>
+          <option value="license">Driver's License</option>
+          <option value="passport">Passport Number</option>
         </select>
 
         <label for="value">Value</label>
-        <input id="value" type="text" placeholder="Enter phone, card, or address"/>
+        <input id="value" type="text" placeholder="Enter information"/>
 
         <div class="row">
           <button type="submit">Save (encrypt)</button>
@@ -53,18 +57,19 @@
       </form>
 
       <div class="search-area">
-        <input id="search" type="text" placeholder="Filter by type / last4 / site"/>
+        <input id="search" type="text" placeholder="Filter by type, value, or website"/>
       </div>
 
       <h2>Saved Entries</h2>
       <div id="entriesList" class="list"></div>
 
-      <p style="margin-top:12px;font-size:11px;text-align:center">
-        <a href="dashboard.html" target="_blank">Open Dashboard →</a>
-      </p>
+      <div class="footer-actions">
+        <span class="status-text">All data encrypted locally</span>
+        <a href="dashboard.html" target="_blank" class="dashboard-link">Dashboard →</a>
+      </div>
     </div>
 
-    <div id="lockedMessage" class="note">Unlock to view/add/search entries.</div>
+    <div id="lockedMessage" class="note">Please unlock to access your encrypted vault.</div>
   </div>
 
   <script src="popup.js"></script>

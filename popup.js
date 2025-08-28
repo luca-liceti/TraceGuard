@@ -1,4 +1,4 @@
-// TraceGuard popup.js  (v3 – fixed create/unlock flow)
+// TraceGuard popup.js  (v3 – improved create/unlock flow)
 const SALT_KEY   = 'tg_salt';
 const ENTRIES_KEY= 'tg_entries';
 const PBKDF_ITER = 200000;
@@ -73,10 +73,59 @@ const searchInput = document.getElementById('search');
 const typeSelect  = document.getElementById('type');
 
 let MASTER_KEY = null;
+let IS_CREATED = false;
+let SESSION_UNLOCKED = false; // Track session state in memory
+
+// Input validation for numeric-only fields
+const numericTypes = ['phone', 'ssn', 'credit'];
 
 function setUnlocked(unlocked){
-  document.getElementById('lockPanel').classList.toggle('hidden', unlocked);
-  document.getElementById('mainUI').classList.toggle('hidden', !unlocked);
+  const lockPanel = document.getElementById('lockPanel');
+  const mainUI = document.getElementById('mainUI');
+  const lockedMessage = document.getElementById('lockedMessage');
+  const lockBtn = document.getElementById('lockNowBtn');
+  
+  if (unlocked) {
+    // Show main interface, hide everything else
+    lockPanel.style.display = 'none';
+    mainUI.classList.remove('hidden');
+    lockedMessage.classList.add('hidden');
+    lockBtn.style.display = IS_CREATED ? 'block' : 'none';
+  } else {
+    // Show lock panel if password exists, otherwise show creation
+    lockPanel.style.display = IS_CREATED ? 'block' : 'block';
+    mainUI.classList.add('hidden');
+    lockedMessage.classList.toggle('hidden', !IS_CREATED);
+    lockBtn.style.display = 'none';
+  }
+}
+
+// Handle input validation for numeric fields
+typeSelect.addEventListener('change', () => {
+  const selectedType = typeSelect.value;
+  if (numericTypes.includes(selectedType)) {
+    valueInput.type = 'tel';
+    valueInput.addEventListener('input', enforceNumericInput);
+  } else {
+    valueInput.type = 'text';
+    valueInput.removeEventListener('input', enforceNumericInput);
+  }
+  
+  // Update placeholder based on type
+  const placeholders = {
+    'email': 'Enter email address',
+    'phone': 'Enter phone number',
+    'address': 'Enter full address',
+    'ssn': 'Enter SSN',
+    'credit': 'Enter credit card number',
+    'license': 'Enter driver license number',
+    'passport': 'Enter passport number'
+  };
+  valueInput.placeholder = placeholders[selectedType] || 'Enter value';
+});
+
+function enforceNumericInput(e) {
+  e.target.value = e.target.value.replace(/[^0-9]/g, '');
 }
 
 /////  Auth flow
@@ -88,41 +137,97 @@ authBtn.addEventListener('click', async () => {
 
   if (!masterHash) {
     // ---- CREATE MODE ----
+    if (!pw) return alert('Password cannot be empty');
     if (pw !== confirm) return alert('Passwords do not match');
+    if (pw.length < 6) return alert('Password must be at least 6 characters');
+    
     const hash = await sha256Hex(pw);
-    await chrome.storage.local.set({ masterHash, locked: false });
     MASTER_KEY = await deriveKey(pw);
+    await chrome.storage.local.set({ masterHash: hash, locked: false });
+    IS_CREATED = true;
+    
+    // Hide password creation UI and show main interface
+    document.getElementById('lockPanel').style.display = 'none';
     setUnlocked(true);
     await refreshEntries();
   } else {
     // ---- UNLOCK MODE ----
-    if ((await sha256Hex(pw)) !== masterHash) return alert('Wrong password');
+    if ((await sha256Hex(pw)) !== masterHash) return alert('Incorrect password');
     MASTER_KEY = await deriveKey(pw);
     await chrome.storage.local.set({ locked: false });
+    IS_CREATED = true;
     setUnlocked(true);
     await refreshEntries();
   }
+  
+  // Clear inputs
+  masterInput.value = '';
+  confirmInput.value = '';
 });
 
 lockNowBtn.addEventListener('click', async () => {
   await chrome.storage.local.set({ locked: true });
+  MASTER_KEY = null;
+  IS_CREATED = true; // Keep this true since password still exists
+  
+  // Reset UI to show unlock screen
+  lockTitle.textContent = 'Enter Password';
+  confirmInput.parentElement.style.display = 'none';
+  authBtn.textContent = 'Unlock';
+  masterInput.value = '';
+  
   setUnlocked(false);
+});
+
+document.getElementById('clearForm').addEventListener('click', () => {
+  valueInput.value = '';
 });
 
 /////  Save entry
 entryForm.addEventListener('submit', async (e)=>{
   e.preventDefault();
-  if(!MASTER_KEY) return alert('Unlock first');
-  const raw=valueInput.value.trim(); if(!raw) return;
+  
+  // Check if we have the master key, if not we need to re-authenticate
+  if(!MASTER_KEY) {
+    alert('Session expired. Please unlock the vault again.');
+    await chrome.storage.local.set({ locked: true });
+    setUnlocked(false);
+    return;
+  }
+  
+  const raw=valueInput.value.trim(); 
+  if(!raw) return alert('Please enter a value');
+  
   const type=typeSelect.value;
   const h=await sha256Hex(raw);
-  const short=(type==='phone'||type==='credit')?'••••'+raw.slice(-4):raw.split(' ').slice(0,2).join(' ')+' …';
+  
+  // Create appropriate short display based on type
+  let short;
+  switch(type) {
+    case 'phone':
+    case 'ssn':
+    case 'credit':
+      short = '••••' + raw.slice(-4);
+      break;
+    case 'email':
+      const atIndex = raw.indexOf('@');
+      if (atIndex > 0) {
+        short = raw.charAt(0) + '••••@' + raw.split('@')[1];
+      } else {
+        short = raw.slice(0, 2) + '••••';
+      }
+      break;
+    default:
+      short = raw.split(' ').slice(0, 2).join(' ') + ' …';
+  }
+  
   let domain='unknown';
   try{
     const tabs=await new Promise(res=>chrome.tabs.query({active:true,currentWindow:true},res));
     domain=new URL(tabs[0]?.url||'').hostname||'unknown';
   }catch{domain='unknown';}
-  const payloadObj={hash:h,type,fullHint:short,ts:Date.now(),site:domain};
+  
+  const payloadObj={hash:h,type,fullHint:short,ts:Date.now(),site:domain,originalValue:raw};
   const enc=await encryptJSON(payloadObj, MASTER_KEY);
   const store=await storageGet([ENTRIES_KEY]);
   const arr=store[ENTRIES_KEY]||[];
@@ -146,12 +251,25 @@ async function refreshEntries(){
   entriesList.innerHTML='';
   const store=await storageGet([ENTRIES_KEY]);
   const arr=store[ENTRIES_KEY]||[];
+  
+  if (arr.length === 0) {
+    entriesList.innerHTML = '<div class="empty-state">No entries saved yet</div>';
+    return;
+  }
+  
   for(let i=0;i<arr.length;i++){
-    let dec; try{ dec=await decryptJSON(arr[i].payload, MASTER_KEY); }catch{ continue; }
-    const card=document.createElement('div'); card.className='entry-card';
+    let dec; 
+    try{ 
+      dec=await decryptJSON(arr[i].payload, MASTER_KEY); 
+    } catch { 
+      continue; 
+    }
+    
+    const card=document.createElement('div'); 
+    card.className='entry-card';
     card.innerHTML=`
       <div class="entry-info">
-        <div><strong>${dec.type}</strong> • ${arr[i].meta.short}</div>
+        <div><strong>${dec.type.toUpperCase()}</strong> • ${arr[i].meta.short}</div>
         <div class="small">site: ${arr[i].meta.site} • ${new Date(arr[i].meta.ts).toLocaleString()}</div>
       </div>
       <button class="remove danger">Remove</button>`;
@@ -163,22 +281,34 @@ async function refreshEntries(){
 /////  Search
 searchInput.addEventListener('input', async (e)=>{
   const q=e.target.value.trim().toLowerCase();
+  if (!q) {
+    await refreshEntries();
+    return;
+  }
+  
   const store=await storageGet([ENTRIES_KEY]);
   const arr=store[ENTRIES_KEY]||[];
   const filtered=arr.map((it,idx)=>({it,idx}))
     .filter(({it})=>{
       const m=it.meta||{};
-      return !q ||
-        m.type.toLowerCase().includes(q) ||
+      return m.type.toLowerCase().includes(q) ||
         m.short.toLowerCase().includes(q) ||
         m.site.toLowerCase().includes(q);
     });
+    
   entriesList.innerHTML='';
+  
+  if (filtered.length === 0) {
+    entriesList.innerHTML = '<div class="empty-state">No matching entries found</div>';
+    return;
+  }
+  
   for(const {it,idx} of filtered){
-    const card=document.createElement('div'); card.className='entry-card';
+    const card=document.createElement('div'); 
+    card.className='entry-card';
     card.innerHTML=`
       <div class="entry-info">
-        <div><strong>${it.meta.type}</strong> • ${it.meta.short}</div>
+        <div><strong>${it.meta.type.toUpperCase()}</strong> • ${it.meta.short}</div>
         <div class="small">site: ${it.meta.site} • ${new Date(it.meta.ts).toLocaleString()}</div>
       </div>
       <button class="remove danger">Remove</button>`;
@@ -187,14 +317,65 @@ searchInput.addEventListener('input', async (e)=>{
   }
 });
 
+// Handle Enter key on password inputs
+masterInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    if (!IS_CREATED && confirmInput.style.display !== 'none') {
+      confirmInput.focus();
+    } else {
+      authBtn.click();
+    }
+  }
+});
+
+confirmInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    authBtn.click();
+  }
+});
+
 /////  Init
 (async function init(){
-  const {locked,masterHash}=await chrome.storage.local.get(['locked','masterHash']);
-  if(masterHash){
-    // already have a password → unlock UI
-    lockTitle.textContent='Unlock Vault';
-    confirmInput.parentElement.style.display='none';
-    authBtn.textContent='Unlock';
+  const {locked, masterHash} = await chrome.storage.local.get(['locked', 'masterHash']);
+  
+  if (masterHash) {
+    // Password exists - check if we need to unlock
+    IS_CREATED = true;
+    
+    // Always hide confirm password for existing users
+    const confirmContainer = confirmInput.parentElement;
+    confirmContainer.style.display = 'none';
+    confirmInput.style.display = 'none';
+    
+    if (locked === false) {
+      // Already unlocked in this session, go straight to main UI
+      lockTitle.textContent = 'Enter Password';
+      authBtn.textContent = 'Unlock';
+      
+      // Try to maintain session by checking if we can access stored data
+      try {
+        const testData = await chrome.storage.local.get([ENTRIES_KEY]);
+        setUnlocked(true);
+        await refreshEntries();
+        return;
+      } catch {
+        // If we can't access data, fall through to show unlock
+      }
+    }
+    
+    // Show unlock UI
+    lockTitle.textContent = 'Enter Password';
+    authBtn.textContent = 'Unlock';
+    setUnlocked(false);
+    
+  } else {
+    // First time - show create UI
+    IS_CREATED = false;
+    lockTitle.textContent = 'Create Master Password';
+    const confirmContainer = confirmInput.parentElement;
+    confirmContainer.style.display = 'block';
+    confirmInput.style.display = 'block';
+    authBtn.textContent = 'Create Password';
+    setUnlocked(false);
   }
-  setUnlocked(!(locked||locked===undefined));
 })();

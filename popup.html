@@ -10,7 +10,7 @@
   <div class="container">
     <header>
       <h1>TraceGuard</h1>
-      <button id="lockNowBtn" class="lock-btn" title="Lock vault" style="display: none;">🔓</button>
+      <button id="lockNowBtn" class="lock-btn" title="Lock vault" style="display: none;">🔒</button>
     </header>
 
     <!-- CREATE / UNLOCK PANEL -->
@@ -20,8 +20,10 @@
       <label for="master">Password</label>
       <input id="master" type="password" placeholder="Enter password"/>
 
-      <label for="confirm">Confirm password</label>
-      <input id="confirm" type="password" placeholder="Confirm password"/>
+      <div id="confirmContainer">
+        <label for="confirm">Confirm password</label>
+        <input id="confirm" type="password" placeholder="Confirm password"/>
+      </div>
 
       <div class="row">
         <button id="authBtn">Create</button>

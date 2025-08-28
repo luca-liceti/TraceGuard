@@ -8,7 +8,7 @@ const storageGet   = (keys)=>new Promise(res=>chrome.storage.local.get(keys,res)
 const storageSet   = (obj)=>new Promise(res=>chrome.storage.local.set(obj,res));
 const storageRemove= (key)=>new Promise(res=>chrome.storage.local.remove(key,res));
 
-/////  crypto helpers 
+/////  crypto helpers
 function bufToB64(buf){
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
@@ -269,7 +269,7 @@ async function refreshEntries(){
     card.className='entry-card';
     card.innerHTML=`
       <div class="entry-info">
-        <div><strong>${dec.type.toUpperCase()}</strong> • ${arr[i].meta.short}</div>
+        <div><strong>${dec.type.charAt(0).toUpperCase() + dec.type.slice(1).toLowerCase()}</strong> • ${arr[i].meta.short}</div>
         <div class="small">site: ${arr[i].meta.site} • ${new Date(arr[i].meta.ts).toLocaleString()}</div>
       </div>
       <button class="remove danger">Remove</button>`;
@@ -308,7 +308,7 @@ searchInput.addEventListener('input', async (e)=>{
     card.className='entry-card';
     card.innerHTML=`
       <div class="entry-info">
-        <div><strong>${it.meta.type.toUpperCase()}</strong> • ${it.meta.short}</div>
+        <div><strong>${it.meta.type.charAt(0).toUpperCase() + it.meta.type.slice(1).toLowerCase()}</strong> • ${it.meta.short}</div>
         <div class="small">site: ${it.meta.site} • ${new Date(it.meta.ts).toLocaleString()}</div>
       </div>
       <button class="remove danger">Remove</button>`;
@@ -343,9 +343,8 @@ confirmInput.addEventListener('keypress', (e) => {
     IS_CREATED = true;
     
     // Always hide confirm password for existing users
-    const confirmContainer = confirmInput.parentElement;
+    const confirmContainer = document.getElementById('confirmContainer');
     confirmContainer.style.display = 'none';
-    confirmInput.style.display = 'none';
     
     if (locked === false) {
       // Already unlocked in this session, go straight to main UI
@@ -372,9 +371,8 @@ confirmInput.addEventListener('keypress', (e) => {
     // First time - show create UI
     IS_CREATED = false;
     lockTitle.textContent = 'Create Master Password';
-    const confirmContainer = confirmInput.parentElement;
+    const confirmContainer = document.getElementById('confirmContainer');
     confirmContainer.style.display = 'block';
-    confirmInput.style.display = 'block';
     authBtn.textContent = 'Create Password';
     setUnlocked(false);
   }

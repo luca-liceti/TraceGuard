@@ -5,32 +5,109 @@
   <title>TraceGuard Dashboard</title>
   <link rel="stylesheet" href="popup.css"/>
   <style>
-    body{max-width:700px;margin:40px auto;padding:0 14px}
-    #resetAll{background:var(--danger);color:#fff;margin-top:20px}
+    body{
+      max-width:700px;
+      margin:40px auto;
+      padding:0 20px;
+      width:auto;
+    }
+    
+    .dashboard-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:24px;
+    }
+    
+    .dashboard-header h1{
+      font-size:24px;
+      margin:0;
+    }
+    
+    .filter-card{
+      margin-bottom:20px;
+    }
+    
+    .entries-card{
+      margin-bottom:24px;
+    }
+    
+    .entry{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:12px;
+      border-radius:8px;
+      background:var(--bg);
+      border:1px solid var(--border);
+      margin-bottom:8px;
+      transition:all 0.2s ease;
+    }
+    
+    .entry:hover{
+      box-shadow:0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .entry:last-child{
+      margin-bottom:0;
+    }
+    
+    .entry span{
+      flex:1;
+      font-size:14px;
+      color:var(--text);
+    }
+    
+    .reset-section{
+      text-align:center;
+      margin-top:32px;
+    }
+    
+    #resetAll{
+      background:var(--danger);
+      color:#fff;
+      padding:12px 20px;
+      font-size:14px;
+      font-weight:600;
+    }
+    
+    .empty-state{
+      text-align:center;
+      color:var(--muted);
+      font-style:italic;
+      padding:40px 20px;
+      background:var(--card);
+      border-radius:12px;
+      border:1px solid var(--border);
+    }
   </style>
 </head>
 <body>
-  <header>
+  <div class="dashboard-header">
     <h1>TraceGuard Dashboard</h1>
     <button id="lockDashBtn" class="lock-btn" title="Lock vault">🔒</button>
-  </header>
+  </div>
 
-  <div class="card">
+  <div class="card filter-card">
     <label for="filter">Filter by Type:</label>
     <select id="filter">
       <option value="">All</option>
-      <option value="phone">Phone</option>
-      <option value="credit">Credit Card</option>
+      <option value="email">Email Address</option>
+      <option value="phone">Phone Number</option>
       <option value="address">Address</option>
+      <option value="ssn">Social Security Number</option>
+      <option value="credit">Credit Card</option>
+      <option value="license">Driver's License</option>
+      <option value="passport">Passport Number</option>
     </select>
   </div>
 
-  <div class="card">
-    <h2>Entries</h2>
+  <div class="card entries-card">
+    <h2>Stored Entries</h2>
     <div id="log-list"></div>
   </div>
 
-  <div style="text-align:center;">
+  <div class="reset-section">
     <button id="resetAll">⚠️ Reset All Data ⚠️</button>
   </div>
 

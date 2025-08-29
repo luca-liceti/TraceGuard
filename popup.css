@@ -1,11 +1,13 @@
 :root{
   --bg:#ffffff; --text:#0b0b0b; --card:#f7f7fb; --muted:#6b6b6b;
   --accent:#007aff; --danger:#ff3b30; --btn-text:#fff; --border:#e5e5e7;
+  --success:#28cd41; --warning:#ffcc00;
 }
 @media (prefers-color-scheme:dark){
   :root{
     --bg:#121214; --text:#eaeaec; --card:#1c1c1e; --muted:#9b9b9f;
     --accent:#0a84ff; --danger:#ff453a; --btn-text:#fff; --border:#2c2c2e;
+    --success:#30d158; --warning:#ffd60a;
   }
 }
 
@@ -13,7 +15,7 @@
 body{
   margin:0;
   padding:14px;
-  width:320px;
+  width:380px;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:var(--bg);
   color:var(--text);
@@ -45,6 +47,13 @@ h2{
   font-weight:600;
 }
 
+h3{
+  margin:16px 0 8px 0;
+  font-size:14px;
+  color:var(--text);
+  font-weight:600;
+}
+
 .lock-btn{
   background:transparent;
   border:none;
@@ -70,6 +79,48 @@ h2{
 
 .hidden{
   display:none
+}
+
+/* Tab Navigation */
+.tab-nav{
+  display:flex;
+  background:var(--bg);
+  border-radius:8px;
+  padding:4px;
+  margin-bottom:16px;
+  border:1px solid var(--border);
+}
+
+.tab-btn{
+  flex:1;
+  padding:8px 12px;
+  border:none;
+  background:transparent;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:600;
+  border-radius:6px;
+  cursor:pointer;
+  transition:all 0.2s ease;
+}
+
+.tab-btn.active{
+  background:var(--accent);
+  color:var(--btn-text);
+}
+
+.tab-btn:hover:not(.active){
+  background:var(--card);
+  color:var(--text);
+}
+
+/* Tab Content */
+.tab-content{
+  display:none;
+}
+
+.tab-content.active{
+  display:block;
 }
 
 label{
@@ -133,6 +184,15 @@ button.secondary:hover{
   color:var(--text);
 }
 
+button.success{
+  background:var(--success);
+}
+
+button.warning{
+  background:var(--warning);
+  color:var(--text);
+}
+
 .row{
   display:flex;
   gap:8px;
@@ -156,6 +216,8 @@ button.secondary:hover{
   gap:8px;
   margin-top:8px;
   min-height:60px;
+  max-height:200px;
+  overflow-y:auto;
 }
 
 .entry-card{
@@ -256,15 +318,89 @@ button.secondary:hover{
   text-decoration:underline;
 }
 
+/* Log Entry Styling */
+.log-entry{
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:10px 12px;
+  margin-bottom:8px;
+}
+
+.log-entry .log-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:6px;
+}
+
+.log-entry .log-type{
+  font-weight:600;
+  font-size:12px;
+  text-transform:uppercase;
+  color:var(--accent);
+}
+
+.log-entry .log-time{
+  font-size:11px;
+  color:var(--muted);
+}
+
+.log-entry .log-site{
+  font-size:13px;
+  color:var(--text);
+  font-weight:500;
+}
+
+.log-entry .log-details{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:4px;
+}
+
+/* Profile entry styling */
+.profile-entry{
+  background:var(--success);
+  color:white;
+  border:none;
+}
+
+.profile-entry .entry-info > div:first-child{
+  color:white;
+}
+
+.profile-entry .small{
+  color:rgba(255,255,255,0.8);
+}
+
+/* Scrollbar styling */
+.list::-webkit-scrollbar{
+  width:6px;
+}
+
+.list::-webkit-scrollbar-track{
+  background:var(--card);
+  border-radius:3px;
+}
+
+.list::-webkit-scrollbar-thumb{
+  background:var(--border);
+  border-radius:3px;
+}
+
+.list::-webkit-scrollbar-thumb:hover{
+  background:var(--muted);
+}
+
 /* Improve form spacing */
 form{
   margin-bottom:0;
 }
 
 /* Better responsive handling for small screens */
-@media (max-width: 340px){
+@media (max-width: 400px){
   body{
-    width:300px;
+    width:360px;
     padding:12px;
   }
   
@@ -278,5 +414,10 @@ form{
   
   .entry-card{
     padding:10px;
+  }
+  
+  .tab-btn{
+    font-size:11px;
+    padding:6px 8px;
   }
 }

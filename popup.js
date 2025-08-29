@@ -235,6 +235,21 @@ entryForm.addEventListener('submit', async (e)=>{
   await storageSet({[ENTRIES_KEY]:arr});
   valueInput.value='';
   await refreshEntries();
+  
+  // Also update detection hash index so content scripts can detect typed values
+  try {
+    const detectStore = await storageGet(['tg_detection_hashes']);
+    const detectArr = detectStore['tg_detection_hashes'] || [];
+    // Add record if not present
+    if (!detectArr.some(d => d.hash === h)) {
+      detectArr.push({ hash: h, type, shortDisplay: short });
+      await storageSet({ 'tg_detection_hashes': detectArr });
+      // Notify content scripts to reload detection hashes
+      chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+    }
+  } catch (err) {
+    console.error('Error updating detection hashes:', err);
+  }
 });
 
 /////  Remove entry

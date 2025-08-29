@@ -37,33 +37,86 @@
 
     <!-- MAIN UI -->
     <div id="mainUI" class="card hidden">
-      <form id="entryForm">
-        <label for="type">Information Type</label>
-        <select id="type">
-          <option value="email">Email Address</option>
-          <option value="phone">Phone Number</option>
-          <option value="address">Address</option>
-          <option value="ssn">Social Security Number</option>
-          <option value="credit">Credit Card</option>
-          <option value="license">Driver's License</option>
-          <option value="passport">Passport Number</option>
-        </select>
-
-        <label for="value">Value</label>
-        <input id="value" type="text" placeholder="Enter information"/>
-
-        <div class="row">
-          <button type="submit">Save (encrypt)</button>
-          <button type="button" id="clearForm" class="secondary">Clear</button>
-        </div>
-      </form>
-
-      <div class="search-area">
-        <input id="search" type="text" placeholder="Filter by type, value, or website"/>
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="manual">Manual Entry</button>
+        <button class="tab-btn" data-tab="profile">My Profile</button>
+        <button class="tab-btn" data-tab="logs">Activity Logs</button>
       </div>
 
-      <h2>Saved Entries</h2>
-      <div id="entriesList" class="list"></div>
+      <!-- Manual Entry Tab -->
+      <div id="manualTab" class="tab-content active">
+        <form id="entryForm">
+          <label for="type">Information Type</label>
+          <select id="type">
+            <option value="email">Email Address</option>
+            <option value="phone">Phone Number</option>
+            <option value="address">Address</option>
+            <option value="ssn">Social Security Number</option>
+            <option value="credit">Credit Card</option>
+            <option value="license">Driver's License</option>
+            <option value="passport">Passport Number</option>
+          </select>
+
+          <label for="value">Value</label>
+          <input id="value" type="text" placeholder="Enter information"/>
+
+          <div class="row">
+            <button type="submit">Save (encrypt)</button>
+            <button type="button" id="clearForm" class="secondary">Clear</button>
+          </div>
+        </form>
+
+        <div class="search-area">
+          <input id="search" type="text" placeholder="Filter by type, value, or website"/>
+        </div>
+
+        <h2>Saved Entries</h2>
+        <div id="entriesList" class="list"></div>
+      </div>
+
+      <!-- Profile Tab -->
+      <div id="profileTab" class="tab-content">
+        <h2>My Information Profile</h2>
+        <p class="note">Add your personal information for automatic detection on websites.</p>
+        
+        <form id="profileForm">
+          <label for="profileType">Information Type</label>
+          <select id="profileType">
+            <option value="email">Email Address</option>
+            <option value="phone">Phone Number</option>
+            <option value="address">Address</option>
+            <option value="ssn">Social Security Number</option>
+            <option value="credit">Credit Card</option>
+            <option value="license">Driver's License</option>
+            <option value="passport">Passport Number</option>
+          </select>
+
+          <label for="profileValue">Value</label>
+          <input id="profileValue" type="text" placeholder="Enter your information"/>
+
+          <div class="row">
+            <button type="submit">Add to Profile</button>
+            <button type="button" id="clearProfileForm" class="secondary">Clear</button>
+          </div>
+        </form>
+
+        <h3>Profile Entries</h3>
+        <div id="profileList" class="list"></div>
+      </div>
+
+      <!-- Activity Logs Tab -->
+      <div id="logsTab" class="tab-content">
+        <h2>Activity Logs</h2>
+        <p class="note">Automatic detection of your information being entered on websites.</p>
+        
+        <div class="search-area">
+          <input id="logSearch" type="text" placeholder="Filter logs by site or type"/>
+          <button id="clearLogs" class="secondary" style="margin-top: 8px; width: 100%;">Clear All Logs</button>
+        </div>
+
+        <div id="logsList" class="list"></div>
+      </div>
 
       <div class="footer-actions">
         <span class="status-text">All data encrypted locally</span>
@@ -74,6 +127,6 @@
     <div id="lockedMessage" class="note">Please unlock to access your encrypted vault.</div>
   </div>
 
-  <script src="popup.js"></script>
+  <script src="popup-enhanced.js"></script>
 </body>
 </html>

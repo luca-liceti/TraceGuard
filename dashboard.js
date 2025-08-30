@@ -51,28 +51,18 @@ document.getElementById('lockDashBtn').addEventListener('click', async () => {
   location.reload();
 });
 
-// Reset all data functionality
-document.getElementById('resetAll').addEventListener('click', async () => {
-  const confirmMessage = '⚠️ WARNING: This will permanently delete ALL stored data including your master password and all encrypted entries.\n\nThis action cannot be undone. Are you sure you want to continue?';
-  
-  if (!confirm(confirmMessage)) return;
-  
-  const finalConfirm = 'Type "DELETE ALL" to confirm permanent data deletion:';
-  const userInput = prompt(finalConfirm);
-  
-  if (userInput !== 'DELETE ALL') {
-    alert('Data deletion cancelled.');
-    return;
-  }
-  
-  try {
-    await chrome.storage.local.clear();
-    alert('All data has been permanently deleted. The extension will need to be set up again.');
-    location.reload();
-  } catch (error) {
-    alert('Error clearing data: ' + error.message);
-  }
-});
+// Reset all data functionality (legacy): only attach if reset button exists
+const legacyResetBtn = document.getElementById('resetAll');
+if (legacyResetBtn) {
+  legacyResetBtn.addEventListener('click', async () => {
+    const confirmMessage = '⚠️ WARNING: This will permanently delete ALL stored data including your master password and all encrypted entries.\n\nThis action cannot be undone. Are you sure you want to continue?';
+    if (!confirm(confirmMessage)) return;
+    const finalConfirm = 'Type "DELETE ALL" to confirm permanent data deletion:';
+    const userInput = prompt(finalConfirm);
+    if (userInput !== 'DELETE ALL') { alert('Data deletion cancelled.'); return; }
+    try { await chrome.storage.local.clear(); alert('All data has been permanently deleted. The extension will need to be set up again.'); location.reload(); } catch (error) { alert('Error clearing data: ' + error.message); }
+  });
+}
 
 // Check authentication status on load
 chrome.storage.local.get(['locked', 'masterHash'], (result) => {
@@ -82,7 +72,7 @@ chrome.storage.local.get(['locked', 'masterHash'], (result) => {
   if (!hasPassword) {
     document.body.innerHTML = `
       <div style="text-align: center; padding: 40px;">
-        <h1>TraceGuard Dashboard</h1>
+  <h1>TraceGuard Dashboard</h1>
         <p>No master password found. Please set up the extension first by using the popup interface.</p>
         <button onclick="chrome.tabs.create({url: chrome.runtime.getURL('popup.html')})">
           Open Extension Setup
@@ -95,9 +85,9 @@ chrome.storage.local.get(['locked', 'masterHash'], (result) => {
   if (isLocked) {
     document.body.innerHTML = `
       <div style="text-align: center; padding: 40px;">
-        <h1>TraceGuard Dashboard</h1>
+  <h1>TraceGuard Dashboard</h1>
         <p>Vault is locked. Please unlock using the extension popup first.</p>
-        <button onclick="location.reload()">Refresh</button>
+  <button onclick="(window.traceguardRefresh && window.traceguardRefresh()) || location.reload()">Refresh</button>
       </div>
     `;
     return;

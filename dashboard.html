@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+<!--
+  TraceGuard Dashboard (static HTML shell)
+  Responsibilities:
+  - Provides the dashboard UI for viewing activity logs, manual entries, and profile data
+  - Loads and runs `dashboard-enhanced.js` for interactive behavior
+  - Contains styles scoped to the dashboard for quick local testing
+-->
 <head>
   <meta charset="UTF-8"/>
   <title>TraceGuard Dashboard</title>
@@ -173,13 +180,23 @@
     
     .log-type{
       background:var(--accent);
-      color:var(--btn-text);
+      color:#ffffff; /* ensure readable */
       padding:4px 8px;
       border-radius:4px;
       font-size:11px;
       font-weight:600;
       text-transform:uppercase;
     }
+
+    .more-btn{
+      background:transparent;
+      border:none;
+      color:var(--muted);
+      cursor:pointer;
+      font-size:12px;
+      padding:0 6px;
+    }
+    .full-url{ display:block; word-break:break-word; max-width:100%; color:var(--text); }
     
     .log-time{
       font-size:12px;
@@ -198,6 +215,7 @@
       color:var(--muted);
       line-height:1.4;
     }
+  .log-details, .entry-details { word-break:break-word; overflow-wrap:anywhere; }
     
     .reset-section{
       text-align:center;
@@ -212,12 +230,17 @@
     }
     
     #resetAll{
-      background:var(--danger);
-      color:#fff;
-      padding:12px 24px;
-      font-size:14px;
+      background: transparent;
+      color: var(--danger);
+      padding:6px 10px;
+      font-size:12px;
       font-weight:600;
+      border:1px solid var(--danger);
+      border-radius:6px;
+      cursor:pointer;
+      transition: background 150ms ease, color 150ms ease, transform 80ms ease;
     }
+    #resetAll:hover{ background: rgba(255,0,0,0.06); transform: translateY(-1px); }
     
     .empty-state{
       text-align:center;
@@ -239,6 +262,18 @@
       font-size:12px;
       font-weight:600;
     }
+    /* subtle clear-logs button to be less alarming than a destructive reset */
+    .clear-logs-btn{
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding:6px 10px;
+      font-size:12px;
+      border-radius:6px;
+      cursor:pointer;
+      transition: background 120ms ease, color 120ms ease, transform 80ms ease;
+    }
+    .clear-logs-btn:hover{ background: rgba(0,0,0,0.03); transform: translateY(-1px); }
     
     @media (max-width: 768px){
       body{
@@ -271,11 +306,40 @@
   </style>
 </head>
 <body>
-  <div class="dashboard-header">
-    <h1>🔒 TraceGuard Dashboard</h1>
+    <div class="dashboard-header">
+    <h1>TraceGuard Dashboard</h1>
     <div style="display:flex;gap:12px;align-items:center;">
-      <button id="refreshBtn" class="refresh-btn">↻ Refresh</button>
-      <button id="lockDashBtn" class="lock-btn" title="Lock vault">🔒</button>
+      
+      <button id="settingsBtn" title="Settings" class="icon-btn tg-gear-btn">
+        <!-- theme-aware inline gear SVG (uses currentColor so it adapts to light/dark) -->
+        <svg class="tg-gear" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 00.12-.63l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.02 7.02 0 00-1.62-.94l-.36-2.54A.5.5 0 0013.5 2h-3a.5.5 0 00-.5.42l-.36 2.54c-.56.22-1.09.52-1.59.87l-2.4-.96a.5.5 0 00-.6.22L2.7 8.5a.5.5 0 00.12.63l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 15.1a.5.5 0 00-.12.63l1.92 3.32c.15.26.46.36.72.27l2.39-.96c.5.35 1.03.65 1.59.87l.36 2.54c.05.25.27.42.5.42h3c.23 0 .45-.17.5-.42l.36-2.54c.56-.22 1.09-.52 1.62-.94l2.39.96c.26.09.57-.01.72-.27l1.92-3.32a.5.5 0 00-.12-.63l-2.03-1.58zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z"/>
+        </svg>
+      </button>
+      
+      <button id="lockDashBtn" class="lock-btn" title="Lock vault">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 10V8a6 6 0 0112 0v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Hovering settings modal (hidden by default). Will be toggled by dashboard-enhanced.js -->
+  <div id="tg-settings-modal" style="display:none;">
+    <div class="tg-settings">
+      <h2>Settings</h2>
+      <div id="tg-settings-body">Loading…</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px;">
+        <button id="tg-save-settings">Save</button>
+        <button id="tg-close-settings" class="secondary">Close</button>
+      </div>
+      <div style="border-top:1px solid var(--border); margin-top:16px; padding-top:12px; text-align:center;">
+        <h3 style="color:var(--danger);">Danger Zone</h3>
+        <p style="color:var(--muted);max-width:440px;margin:0 auto 12px;">Permanently delete all TraceGuard data including passwords and logs.</p>
+        <button id="tg-reset-all" style="background: transparent; color: var(--danger); padding:6px 10px; font-size:12px; font-weight:600; border:1px solid var(--danger); border-radius:6px; cursor:pointer;">Reset data</button>
+      </div>
     </div>
   </div>
 
@@ -302,6 +366,7 @@
     <button class="dashboard-tab active" data-tab="logs">Activity Logs</button>
     <button class="dashboard-tab" data-tab="entries">Manual Entries</button>
     <button class="dashboard-tab" data-tab="profile">Profile Data</button>
+  <button class="dashboard-tab" data-tab="sites">Sites</button>
   </div>
 
   <!-- Activity Logs Tab -->
@@ -333,9 +398,9 @@
     </div>
 
     <div class="entries-section">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <h3>Recent Activity</h3>
-        <button id="clearAllLogs" style="background:var(--danger);color:white;font-size:12px;">Clear All Logs</button>
+        <button id="clearAllLogs" class="clear-logs-btn">Clear logs</button>
       </div>
       <div id="log-list"></div>
     </div>
@@ -386,11 +451,12 @@
     </div>
   </div>
 
-  <div class="reset-section">
-    <h3>⚠️ Danger Zone</h3>
-    <p>Permanently delete all TraceGuard data including passwords and logs.</p>
-    <button id="resetAll">🗑️ Reset All Data</button>
+  <!-- Sites Tab -->
+  <div id="sitesContent" class="dashboard-content">
+    <!-- renderSites() will populate this area -->
   </div>
+
+  <!-- Reset moved into the Settings modal to reduce prominence -->
 
   <script src="dashboard-enhanced.js"></script>
 </body>

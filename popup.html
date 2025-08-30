@@ -10,7 +10,13 @@
   <div class="container">
     <header>
       <h1>TraceGuard</h1>
-      <button id="lockNowBtn" class="lock-btn" title="Lock vault" style="display: none;">🔒</button>
+      <button id="lockNowBtn" class="lock-btn" title="Lock vault" style="display: none;">
+        <!-- minimalist lock icon (uses currentColor so it adapts to theme) -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 10V8a6 6 0 0112 0v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+      </button>
     </header>
 
     <!-- CREATE / UNLOCK PANEL -->
@@ -118,9 +124,11 @@
         <div id="logsList" class="list"></div>
       </div>
 
-      <div class="footer-actions">
+        <div class="footer-actions">
         <span class="status-text">All data encrypted locally</span>
-        <a href="dashboard.html" target="_blank" class="dashboard-link">Dashboard →</a>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a href="dashboard.html" target="_blank" class="dashboard-link">Dashboard →</a>
+        </div>
       </div>
     </div>
 

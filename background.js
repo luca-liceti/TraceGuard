@@ -1,7 +1,24 @@
 // TraceGuard Background Script - Enhanced with Badge and Messaging
+// Purpose:
+// - Runs in the extension background context.
+// - Manages the browser action badge (counts of detections per tab).
+// - Receives and routes messages between content scripts and popup UI.
+// - Responds to lifecycle events (startup / install) to clear badges.
+// Notes:
+// - This file should avoid long-running work; it primarily forwards
+//   messages and updates small pieces of state (badges).
 chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.set({ locked: true });
-  clearAllBadges();
+  // If the user opted to preserve session, don't force-lock on startup
+  chrome.storage.local.get(['tg_preserve_session']).then(prefs => {
+    if (!prefs.tg_preserve_session) {
+      chrome.storage.local.set({ locked: true });
+    }
+    clearAllBadges();
+  }).catch(() => {
+    // fallback: lock to be safe
+    chrome.storage.local.set({ locked: true });
+    clearAllBadges();
+  });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -31,7 +48,7 @@ function updateBadgeForTab(tabId, count) {
       tabId: tabId
     });
     chrome.action.setBadgeBackgroundColor({
-      color: '#ff3b30',
+      color: '#007aff',
       tabId: tabId
     });
   } else {

@@ -1,4 +1,9 @@
 // TraceGuard Content Script - Form Detection and Monitoring
+// This script runs in page context and:
+// - loads detection hashes/profile entries from storage
+// - monitors form inputs and submissions
+// - matches typed/pasted values against known profile values or hash list
+// - logs detections to extension storage and shows a transient UI notification
 let isUnlocked = false;
 let knownEntries = [];
 let lastNotificationTime = {};
@@ -41,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Load known PII entries from storage
+// loadKnownEntries: load unencrypted profile entries used for direct matching
 async function loadKnownEntries() {
   try {
     const result = await chrome.storage.local.get(['tg_known_pii']);
@@ -51,7 +56,9 @@ async function loadKnownEntries() {
   }
 }
 
-// Load detection hashes used for hash-based matching
+// loadDetectionHashes: load the list of stored detection hashes. These are
+// sha256 hashes of profile values and are used for robust detection of
+// typed values that may have formatting differences.
 async function loadDetectionHashes() {
   try {
     const result = await chrome.storage.local.get(['tg_detection_hashes']);
@@ -61,7 +68,8 @@ async function loadDetectionHashes() {
   }
 }
 
-// Initialize form monitoring
+// initFormMonitoring: attach listeners to the page to monitor input, paste,
+// and submit events so we can detect PII being entered into forms.
 function initFormMonitoring() {
   // Monitor input changes
   document.addEventListener('input', handleInputChange, true);
@@ -95,7 +103,9 @@ function handlePaste(event) {
   }, 100);
 }
 
-// Check if input matches known PII
+// checkForKnownPII: core detection logic. First tries plain-text matching
+// against known profile entries (when unlocked). Then falls back to
+// hash-based matching using detectionHashes.
 async function checkForKnownPII(element, value) {
   // 1) If unlocked, check plain knownEntries first (profile entries)
   if (isUnlocked && knownEntries.length > 0) {
@@ -151,14 +161,15 @@ async function checkForKnownPII(element, value) {
   }
 }
 
-// SHA-256 helper (returns hex string)
+// sha256Hex: helper used both for detection and for storing detection hashes
 async function sha256Hex(msg) {
   const enc = new TextEncoder().encode(msg);
   const digest = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Log PII usage
+// logPIIUsage: record a detection to storage, include page/context info,
+// and update the extension badge. Keeps logs capped to avoid unbounded growth.
 async function logPIIUsage(match, element) {
   const log = {
     type: match.type,
@@ -186,7 +197,9 @@ async function logPIIUsage(match, element) {
   updateBadge();
 }
 
-// Get context about the form field
+// getFieldContext: extract helpful metadata about the input field that triggered
+// detection (label, placeholder, name/id) so the user can understand where
+// the detection happened.
 function getFieldContext(element) {
   const context = {
     tagName: element.tagName.toLowerCase(),
@@ -215,8 +228,9 @@ function getFieldContext(element) {
   return context;
 }
 
-// Show notification
-function showNotification(match) {
+// showNotification: small in-page visual that informs the user that the
+// extension detected a profile value in a page field. This is transient.
+async function showNotification(match) {
   const fieldKey = `${match.type}_${window.location.hostname}`;
   const now = Date.now();
   
@@ -226,48 +240,59 @@ function showNotification(match) {
   
   lastNotificationTime[fieldKey] = now;
   
-  // Create visual notification
-  const notification = document.createElement('div');
-  notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: #007aff;
-    color: white;
-    padding: 12px 16px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 10000;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    max-width: 300px;
-    animation: slideIn 0.3s ease;
-  `;
-  
-  notification.innerHTML = `
-    <strong>🔒 TraceGuard</strong><br>
-    Detected: ${match.type.toUpperCase()} (${match.shortDisplay})
-  `;
-  
-  // Add animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideIn {
-      from { transform: translateX(100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-  `;
-  document.head.appendChild(style);
-  
-  document.body.appendChild(notification);
-  
-  setTimeout(() => {
-    notification.style.animation = 'slideIn 0.3s ease reverse';
-    setTimeout(() => notification.remove(), 300);
-  }, 3000);
+  // Check user settings to decide whether to show notifications
+  try {
+    const prefs = await chrome.storage.local.get(['tg_notify_new', 'tg_notify_repeat', 'tg_preserve_session']);
+    const notifyNew = prefs.tg_notify_new !== false; // default true
+    const notifyRepeat = prefs.tg_notify_repeat !== false; // default true
+
+    // Determine whether this site has been seen before
+    const store = await chrome.storage.local.get(['tg_usage_logs']);
+    const logs = store.tg_usage_logs || [];
+    const seenBefore = logs.some(l => l.site === window.location.hostname && l.type === match.type);
+
+    if (!seenBefore && !notifyNew) return;
+    if (seenBefore && !notifyRepeat) return;
+  } catch (err) {
+    // If prefs can't be read, fall back to showing notification
+  }
+
+  // Use a single shared notification element with class-based transitions
+  let shared = document.getElementById('traceguard-notification');
+  if (!shared) {
+    shared = document.createElement('div');
+    shared.id = 'traceguard-notification';
+    shared.className = 'tg-notification';
+    shared.setAttribute('role', 'status');
+    shared.innerHTML = `<div class="tg-icon" aria-hidden="true">🔒</div><div class="tg-content"><div class="tg-title">TraceGuard</div><div class="tg-msg"></div></div>`;
+    document.body.appendChild(shared);
+
+    // Inject style once (theme-aware)
+    const style = document.createElement('style');
+    style.id = 'traceguard-notification-style';
+    style.textContent = `
+      .tg-notification{ position:fixed; top:18px; right:18px; padding:10px 12px; border-radius:10px; box-shadow:0 12px 30px rgba(0,0,0,0.18); z-index:100000; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; max-width:360px; display:flex; gap:10px; align-items:center; transform:translateY(-8px) translateX(8px); opacity:0; transition:transform 320ms cubic-bezier(.2,.9,.2,1), opacity 240ms ease; }
+      .tg-notification .tg-icon{ width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex:0 0 36px; }
+      .tg-notification .tg-content{ display:flex; flex-direction:column; gap:3px; }
+      .tg-notification .tg-title{ font-weight:700; font-size:13px; }
+      .tg-notification .tg-msg{ font-weight:500; font-size:13px; color:inherit; }
+      .tg-notification.tg-show{ transform:translateY(0) translateX(0); opacity:1; }
+      @media (prefers-color-scheme: light){ .tg-notification{ background:#fff; color:#0b0b0b; border:1px solid rgba(0,0,0,0.06);} .tg-notification .tg-icon{ background:#eef6ff; color:#0a66ff; } }
+      @media (prefers-color-scheme: dark){ .tg-notification{ background:#1b1b1d; color:#eaeaec; border:1px solid rgba(255,255,255,0.04);} .tg-notification .tg-icon{ background:rgba(10,132,255,0.12); color:#0a84ff; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const msg = shared.querySelector('.tg-msg');
+  msg.textContent = `Detected: ${match.type.toUpperCase()} (${match.shortDisplay})`;
+  shared.classList.add('tg-show');
+
+  // Hide after a timeout
+  setTimeout(() => { shared.classList.remove('tg-show'); }, 3200);
 }
 
-// Update badge with site log count
+// updateBadge: compute the number of detections for the current site and
+// notify the background script to update the extension action badge.
 async function updateBadge() {
   try {
     const result = await chrome.storage.local.get(['tg_usage_logs']);
@@ -285,7 +310,7 @@ async function updateBadge() {
   }
 }
 
-// Debounce utility
+// debounce utility: common debounce function to avoid spamming detection checks
 function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {

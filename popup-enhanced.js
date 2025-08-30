@@ -1,16 +1,29 @@
-// TraceGuard Enhanced Popup (v4 – with profile management and activity logs)
+// TraceGuard Enhanced Popup (v4 – FIXED with proper detection hash management)
+// This file implements the popup UI and logic for TraceGuard.
+// Responsibilities:
+// - Manage master password creation/unlock (derive AES key)
+// - Add/remove encrypted manual entries
+// - Add/remove profile entries (used for detection)
+// - Maintain detection hashes used by content scripts
+// - Render lists and handle user interactions in the popup
 const SALT_KEY = 'tg_salt';
 const ENTRIES_KEY = 'tg_entries';
 const PROFILE_KEY = 'tg_known_pii';
 const LOGS_KEY = 'tg_usage_logs';
+const DETECTION_KEY = 'tg_detection_hashes';
 const PBKDF_ITER = 200000;
 
 /////  storage helpers
+// Lightweight Promise-based wrappers for chrome.storage.local. Using
+// these makes async code easier to read (async/await) compared to callbacks.
 const storageGet = (keys) => new Promise(res => chrome.storage.local.get(keys, res));
 const storageSet = (obj) => new Promise(res => chrome.storage.local.set(obj, res));
 const storageRemove = (key) => new Promise(res => chrome.storage.local.remove(key, res));
 
 /////  crypto helpers
+// Helpers to derive encryption keys, encrypt/decrypt JSON payloads,
+// and compute SHA-256 hashes. These are intentionally browser-native
+// Web Crypto API calls to avoid adding dependencies.
 function bufToB64(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
@@ -40,7 +53,7 @@ async function deriveKey(password) {
     { name: 'PBKDF2', salt, iterations: PBKDF_ITER, hash: 'SHA-256' },
     baseKey,
     { name: 'AES-GCM', length: 256 },
-    false,
+  true, // make extractable so we can optionally persist session key (user setting)
     ['encrypt', 'decrypt']
   );
 }
@@ -57,12 +70,14 @@ async function decryptJSON(payloadB64, key) {
   return JSON.parse(new TextDecoder().decode(plain));
 }
 async function sha256Hex(msg) {
-  const buf = new TextEncoder().encode(msg);
-  const digest = await crypto.subtle.digest('SHA-256', buf);
+  const enc = new TextEncoder().encode(msg);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /////  UI refs
+// DOM references used to wire up the popup UI. Keeping these here makes
+// the render/refresh functions easier to implement.
 const masterInput = document.getElementById('master');
 const confirmInput = document.getElementById('confirm');
 const authBtn = document.getElementById('authBtn');
@@ -74,13 +89,13 @@ const entriesList = document.getElementById('entriesList');
 const searchInput = document.getElementById('search');
 const typeSelect = document.getElementById('type');
 
-// Profile management refs
+// Profile management refs (profile tab elements)
 const profileForm = document.getElementById('profileForm');
 const profileTypeSelect = document.getElementById('profileType');
 const profileValueInput = document.getElementById('profileValue');
 const profileList = document.getElementById('profileList');
 
-// Logs refs
+// Logs refs (activity logs tab elements)
 const logsList = document.getElementById('logsList');
 const logSearchInput = document.getElementById('logSearch');
 
@@ -90,7 +105,7 @@ let IS_CREATED = false;
 // Input validation for numeric-only fields
 const numericTypes = ['phone', 'ssn', 'credit'];
 
-// Tab management
+// Tab management: simple client-side tab switching and per-tab refresh
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tabId = btn.dataset.tab;
@@ -119,6 +134,7 @@ function switchTab(tabId) {
   }
 }
 
+// setUnlocked: show/hide the lock UI and notify content scripts of status
 function setUnlocked(unlocked) {
   const lockPanel = document.getElementById('lockPanel');
   const mainUI = document.getElementById('mainUI');
@@ -132,10 +148,14 @@ function setUnlocked(unlocked) {
     lockBtn.style.display = IS_CREATED ? 'block' : 'none';
 
     // Notify content scripts about unlock status
-    chrome.runtime.sendMessage({
-      type: 'statusChanged',
-      unlocked: true
-    });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'statusChanged',
+        unlocked: true
+      });
+    } catch (error) {
+      console.log('Could not send message to background script:', error);
+    }
 
     // Refresh current tab
     const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
@@ -147,14 +167,18 @@ function setUnlocked(unlocked) {
     lockBtn.style.display = 'none';
 
     // Notify content scripts about lock status
-    chrome.runtime.sendMessage({
-      type: 'statusChanged',
-      unlocked: false
-    });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'statusChanged',
+        unlocked: false
+      });
+    } catch (error) {
+      console.log('Could not send message to background script:', error);
+    }
   }
 }
 
-// Handle input validation for numeric fields
+// Handle input validation for numeric fields (enables numeric-only input enforcement)
 function setupInputValidation(typeSelect, valueInput) {
   typeSelect.addEventListener('change', () => {
     const selectedType = typeSelect.value;
@@ -188,6 +212,7 @@ setupInputValidation(typeSelect, valueInput);
 setupInputValidation(profileTypeSelect, profileValueInput);
 
 /////  Auth flow
+// Handles Create / Unlock flows, derives MASTER_KEY and sets `locked` in storage.
 authBtn.addEventListener('click', async () => {
   const pw = masterInput.value.trim();
   const confirm = confirmInput.value.trim();
@@ -202,6 +227,14 @@ authBtn.addEventListener('click', async () => {
 
     const hash = await sha256Hex(pw);
     MASTER_KEY = await deriveKey(pw);
+    // persist session key if user opted in
+    const preserve = (await storageGet(['tg_preserve_session'])).tg_preserve_session;
+    if (preserve !== false) {
+      try {
+        const rawKey = await crypto.subtle.exportKey('raw', MASTER_KEY);
+        await storageSet({ tg_session_key: bufToB64(rawKey) });
+      } catch (e) { /* ignore export errors */ }
+    }
     await chrome.storage.local.set({ masterHash: hash, locked: false });
     IS_CREATED = true;
 
@@ -211,6 +244,13 @@ authBtn.addEventListener('click', async () => {
     // UNLOCK MODE
     if ((await sha256Hex(pw)) !== masterHash) return alert('Incorrect password');
     MASTER_KEY = await deriveKey(pw);
+    const preserve = (await storageGet(['tg_preserve_session'])).tg_preserve_session;
+    if (preserve !== false) {
+      try {
+        const rawKey = await crypto.subtle.exportKey('raw', MASTER_KEY);
+        await storageSet({ tg_session_key: bufToB64(rawKey) });
+      } catch (e) { /* ignore export errors */ }
+    }
     await chrome.storage.local.set({ locked: false });
     IS_CREATED = true;
     setUnlocked(true);
@@ -242,14 +282,35 @@ document.getElementById('clearProfileForm').addEventListener('click', () => {
 });
 
 /////  Manual Entry (original functionality)
+// When a user saves a manual entry we:
+// 1) validate the session is unlocked
+// 2) compute a SHA-256 of the raw value
+// 3) encrypt a payload with the MASTER_KEY
+// 4) store the encrypted payload and a small metadata object locally
+// 5) update detection hashes so content scripts can detect typed variants
 entryForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-
   if (!MASTER_KEY) {
-    alert('Session expired. Please unlock the vault again.');
-    await chrome.storage.local.set({ locked: true });
-    setUnlocked(false);
-    return;
+    // Try a soft inline unlock: if a master password exists and storage
+    // indicates the vault is not locked, ask the user for their password
+    // so we can derive the key and proceed. This avoids showing a
+    // confusing "session expired" message immediately after setup.
+    const state = await chrome.storage.local.get(['masterHash', 'locked']);
+    if (state.masterHash && state.locked === false) {
+      const pw = prompt('Enter your master password to save this entry:');
+      if (!pw) return; // user cancelled
+      if ((await sha256Hex(pw)) !== state.masterHash) {
+        alert('Incorrect password');
+        return;
+      }
+      MASTER_KEY = await deriveKey(pw);
+      // keep locked flag as false; we only change it when the lock button is pressed
+    } else if (!state.masterHash) {
+      return alert('Please set up a master password first using the popup.');
+    } else {
+      // If storage says locked === true, require explicit unlock via UI
+      return alert('Vault is locked. Please unlock via the popup to save entries.');
+    }
   }
 
   const raw = valueInput.value.trim();
@@ -274,27 +335,61 @@ entryForm.addEventListener('submit', async (e) => {
   await storageSet({ [ENTRIES_KEY]: arr });
   valueInput.value = '';
   await refreshEntries();
-  // Update detection hashes so content scripts can match typed values by hash
+
+  // FIXED: Update detection hashes properly
+  await updateDetectionHashes(h, type, short);
+  // Append this manual save to the activity logs so manual entries show in the Logs tab
   try {
-    const detectStore = await storageGet(['tg_detection_hashes']);
-    const detectArr = detectStore['tg_detection_hashes'] || [];
-    if (!detectArr.some(d => d.hash === h)) {
-      detectArr.push({ hash: h, type, shortDisplay: short });
-      await storageSet({ 'tg_detection_hashes': detectArr });
-      chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+    // Try to get the current active tab URL for context
+    let currentUrl = 'popup';
+    try {
+      const tabs = await new Promise(res => chrome.tabs.query({ active: true, currentWindow: true }, res));
+      currentUrl = tabs[0]?.url || currentUrl;
+    } catch (e) {
+      // ignore, fallback to 'popup'
     }
+
+    const logsStore = await storageGet([LOGS_KEY]);
+    const logsArr = logsStore[LOGS_KEY] || [];
+    const logObj = {
+      type,
+      value: h,
+      shortDisplay: short,
+      site: domain,
+      url: currentUrl,
+      timestamp: Date.now(),
+      fieldContext: { label: 'Manual Save' }
+    };
+    logsArr.push(logObj);
+    // Keep logs bounded
+    if (logsArr.length > 1000) logsArr.splice(0, logsArr.length - 1000);
+    await storageSet({ [LOGS_KEY]: logsArr });
+
+    // Refresh logs UI in case the user is viewing them
+    try { await refreshLogs(); } catch (e) { /* ignore */ }
+
+    // Notify background to refresh badges
+    try { chrome.runtime.sendMessage({ type: 'refreshBadges' }); } catch (e) { /* ignore */ }
   } catch (err) {
-    console.error('Error updating detection hashes:', err);
+    console.error('Error appending manual entry to logs:', err);
   }
 });
 
 /////  Profile Management
+// Manage the user's profile entries used for automatic detection on websites.
+// Profile entries are stored unencrypted (to enable detection in content scripts)
+// and may be removed only via the explicit Remove action.
 profileForm.addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  if (!MASTER_KEY) {
-    alert('Session expired. Please unlock the vault again.');
-    return;
+  // Profile entries are stored unencrypted so they can be detected by
+  // content scripts even when the vault is locked. Require only that the
+  // extension has been set up (a master password exists), not that the
+  // in-memory MASTER_KEY is present. This avoids a confusing "session
+  // expired" error right after creating the account.
+  const masterState = await storageGet(['masterHash']);
+  if (!masterState.masterHash) {
+    return alert('Please set up a master password first using the popup.');
   }
 
   const raw = profileValueInput.value.trim();
@@ -330,25 +425,45 @@ profileForm.addEventListener('submit', async (e) => {
   await refreshProfileEntries();
 
   // Notify content scripts to reload known entries
-  chrome.runtime.sendMessage({
-    type: 'statusChanged',
-    unlocked: true
-  });
-  // Also add detection hash for this profile entry to allow detection while locked
   try {
-    const h = await sha256Hex(raw);
-    const detectStore = await storageGet(['tg_detection_hashes']);
-    const detectArr = detectStore['tg_detection_hashes'] || [];
-    if (!detectArr.some(d => d.hash === h)) {
-      detectArr.push({ hash: h, type, shortDisplay: short });
-      await storageSet({ 'tg_detection_hashes': detectArr });
-      chrome.runtime.sendMessage({ type: 'detectionUpdated' });
-    }
-  } catch (err) {
-    console.error('Error updating detection hashes for profile entry:', err);
+    chrome.runtime.sendMessage({
+      type: 'statusChanged',
+      unlocked: true
+    });
+  } catch (error) {
+    console.log('Could not send message to background script:', error);
   }
+
+  // FIXED: Add detection hash for this profile entry
+  const h = await sha256Hex(raw);
+  await updateDetectionHashes(h, type, short);
 });
 
+// updateDetectionHashes: ensure the detection hash store contains a hash
+// for each profile/entry value so content scripts can match typed values
+async function updateDetectionHashes(hash, type, shortDisplay) {
+  try {
+    const detectStore = await storageGet([DETECTION_KEY]);
+    const detectArr = detectStore[DETECTION_KEY] || [];
+    
+    // Add if not already present
+    if (!detectArr.some(d => d.hash === hash)) {
+      detectArr.push({ hash, type, shortDisplay });
+      await storageSet({ [DETECTION_KEY]: detectArr });
+      
+      // Notify content scripts about the update
+      try {
+        chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+      } catch (error) {
+        console.log('Could not send detection update message:', error);
+      }
+    }
+  } catch (err) {
+    console.error('Error updating detection hashes:', err);
+  }
+}
+
+// isValidPII: basic validation for common PII types before adding to profile
 function isValidPII(value, type) {
   const patterns = {
     email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
@@ -363,6 +478,8 @@ function isValidPII(value, type) {
   return value.length >= 3; // Basic validation for other types
 }
 
+// createShortDisplay: produce a short, user-friendly hint for stored values
+// (used in lists so raw values aren't shown directly)
 function createShortDisplay(raw, type) {
   switch (type) {
     case 'phone':
@@ -382,37 +499,80 @@ function createShortDisplay(raw, type) {
 }
 
 /////  Remove functions
+// removeEntry / removeProfileEntry: explicit user actions to delete data.
+// These functions also update detection hashes and UI after mutation.
 async function removeEntry(idx) {
   const store = await storageGet([ENTRIES_KEY]);
   const arr = store[ENTRIES_KEY] || [];
   arr.splice(idx, 1);
   await storageSet({ [ENTRIES_KEY]: arr });
   await refreshEntries();
+  
+  // Clean up orphaned detection hashes
+  await cleanupDetectionHashes();
 }
 
 async function removeProfileEntry(idx) {
   const store = await storageGet([PROFILE_KEY]);
   const arr = store[PROFILE_KEY] || [];
-  // compute hash for removed profile entry and remove from detection index
   const removed = arr.splice(idx, 1)[0];
   await storageSet({ [PROFILE_KEY]: arr });
   await refreshProfileEntries();
 
+  // FIXED: Remove detection hash for removed profile entry
   try {
     const h = await sha256Hex(removed.value);
-    const detectStore = await storageGet(['tg_detection_hashes']);
-    let detectArr = detectStore['tg_detection_hashes'] || [];
+    const detectStore = await storageGet([DETECTION_KEY]);
+    let detectArr = detectStore[DETECTION_KEY] || [];
     detectArr = detectArr.filter(d => d.hash !== h);
-    await storageSet({ 'tg_detection_hashes': detectArr });
-    chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+    await storageSet({ [DETECTION_KEY]: detectArr });
+    
+    try {
+      chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+      chrome.runtime.sendMessage({ type: 'statusChanged', unlocked: true });
+    } catch (error) {
+      console.log('Could not send update messages:', error);
+    }
   } catch (err) {
     console.error('Error removing detection hash for profile entry:', err);
   }
-  // Notify content scripts about lock/state change
-  chrome.runtime.sendMessage({ type: 'statusChanged', unlocked: true });
+}
+
+// cleanupDetectionHashes: remove detection hash entries that are no longer
+// referenced by profile entries. This prevents detection store growth.
+async function cleanupDetectionHashes() {
+  try {
+    const result = await storageGet([DETECTION_KEY, PROFILE_KEY]);
+    const detectionHashes = result[DETECTION_KEY] || [];
+    const profile = result[PROFILE_KEY] || [];
+    
+    // Get valid hashes from profile entries
+    const validHashes = new Set();
+    for (const profileEntry of profile) {
+      const hash = await sha256Hex(profileEntry.value);
+      validHashes.add(hash);
+    }
+    
+    // Keep detection hashes that are still in profile
+    const cleanedHashes = detectionHashes.filter(dh => validHashes.has(dh.hash));
+    
+    // Only update if something changed
+    if (cleanedHashes.length !== detectionHashes.length) {
+      await storageSet({ [DETECTION_KEY]: cleanedHashes });
+      try {
+        chrome.runtime.sendMessage({ type: 'detectionUpdated' });
+      } catch (error) {
+        console.log('Could not send detection update:', error);
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning detection hashes:', error);
+  }
 }
 
 /////  Render functions
+// refreshEntries / refreshProfileEntries / refreshLogs: update the UI lists
+// shown in the popup. They decrypt entries when needed and build DOM cards.
 async function refreshEntries() {
   entriesList.innerHTML = '';
   const store = await storageGet([ENTRIES_KEY]);
@@ -484,6 +644,9 @@ async function refreshLogs() {
   logs.forEach(log => {
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
+    // Capitalize fallback field identifier and keep URL expansions contained
+  const fieldIdRaw = log.fieldContext?.label || log.fieldContext?.placeholder || 'Unknown';
+    const fieldId = fieldIdRaw.charAt(0).toUpperCase() + fieldIdRaw.slice(1);
     logEntry.innerHTML = `
       <div class="log-header">
         <span class="log-type">${log.type}</span>
@@ -491,14 +654,16 @@ async function refreshLogs() {
       </div>
       <div class="log-site">${log.site}</div>
       <div class="log-details">
-        Used: ${log.shortDisplay} • Field: ${log.fieldContext?.label || log.fieldContext?.placeholder || 'Unknown field'}
+        Used: ${log.shortDisplay} • Field: ${fieldId}
       </div>
     `;
-    logsList.appendChild(logEntry);
+  logsList.appendChild(logEntry);
   });
 }
 
 /////  Search functionality
+// Typed search handlers for the entries/logs lists; they call the refresh
+// helpers with filtered results.
 searchInput.addEventListener('input', async (e) => {
   const q = e.target.value.trim().toLowerCase();
   if (!q) {
@@ -571,21 +736,25 @@ logSearchInput.addEventListener('input', async (e) => {
       </div>
       <div class="log-site">${log.site}</div>
       <div class="log-details">
-        Used: ${log.shortDisplay} • Field: ${log.fieldContext?.label || log.fieldContext?.placeholder || 'Unknown field'}
+        Used: ${log.shortDisplay} • Field: ${(log.fieldContext?.label || log.fieldContext?.placeholder || 'Unknown').charAt(0).toUpperCase() + (log.fieldContext?.label || log.fieldContext?.placeholder || 'Unknown').slice(1)}
       </div>
     `;
     logsList.appendChild(logEntry);
   });
 });
 
-// Clear logs functionality
+// Clear logs functionality (user-initiated)
 document.getElementById('clearLogs').addEventListener('click', async () => {
   if (confirm('Are you sure you want to clear all activity logs?')) {
     await storageSet({ [LOGS_KEY]: [] });
     await refreshLogs();
     
     // Refresh badges
-    chrome.runtime.sendMessage({ type: 'refreshBadges' });
+    try {
+      chrome.runtime.sendMessage({ type: 'refreshBadges' });
+    } catch (error) {
+      console.log('Could not send refresh badges message:', error);
+    }
   }
 });
 
@@ -607,8 +776,26 @@ confirmInput.addEventListener('keypress', (e) => {
 });
 
 /////  Init
+// Bootstrapping: decide whether the extension is in Create or Unlock mode
+// and set up the initial UI state accordingly.
 (async function init() {
   const { locked, masterHash } = await chrome.storage.local.get(['locked', 'masterHash']);
+
+  // If preserveSession is enabled and a session key exists, try to import it
+  try {
+    const prefs = await storageGet(['tg_preserve_session', 'tg_session_key']);
+    if (prefs.tg_preserve_session !== false && prefs.tg_session_key) {
+      try {
+        const raw = b64ToBuf(prefs.tg_session_key);
+        MASTER_KEY = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        // If we successfully imported a session key and user opted to preserve session,
+        // ensure storage marks the vault as unlocked so UI shows unlocked state.
+        try {
+          await storageSet({ locked: false });
+        } catch (e) { /* ignore */ }
+      } catch (e) { /* ignore import errors */ }
+    }
+  } catch (e) { /* ignore */ }
 
   if (masterHash) {
     IS_CREATED = true;

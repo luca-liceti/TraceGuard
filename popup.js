@@ -1,4 +1,9 @@
 // TraceGuard popup.js  (v3 – improved create/unlock flow)
+// Purpose:
+// - Implements the popup UI for TraceGuard (create/unlock, entries list)
+// - Derives encryption keys, encrypts & stores entries, and manages session
+// - This is the older popup script; see popup-enhanced.js for the latest
+//   enhanced implementation with detection hash management.
 const SALT_KEY   = 'tg_salt';
 const ENTRIES_KEY= 'tg_entries';
 const PBKDF_ITER = 200000;
@@ -189,10 +194,17 @@ entryForm.addEventListener('submit', async (e)=>{
   
   // Check if we have the master key, if not we need to re-authenticate
   if(!MASTER_KEY) {
-    alert('Session expired. Please unlock the vault again.');
-    await chrome.storage.local.set({ locked: true });
-    setUnlocked(false);
-    return;
+    const state = await chrome.storage.local.get(['masterHash','locked']);
+    if (state.masterHash && state.locked === false) {
+      const pw = prompt('Enter your master password to save this entry:');
+      if (!pw) return;
+      if ((await sha256Hex(pw)) !== state.masterHash) { alert('Incorrect password'); return; }
+      MASTER_KEY = await deriveKey(pw);
+    } else if (!state.masterHash) {
+      return alert('Please set up a master password first.');
+    } else {
+      return alert('Vault is locked. Please unlock via the popup to save entries.');
+    }
   }
   
   const raw=valueInput.value.trim(); 

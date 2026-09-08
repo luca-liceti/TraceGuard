@@ -96,9 +96,9 @@ describe('storage.addDetectorLog (no key)', () => {
         expect(detectorLogs[0].domain).toBe('example.com');
     });
 
-    it('trims to 1000 entries when exceeded', async () => {
-        // Pre-fill with 1001 logs
-        const existing = Array.from({ length: 1001 }, (_, i) => ({
+    it('trims to 5000 entries when exceeded', async () => {
+        // Pre-fill with 5001 logs
+        const existing = Array.from({ length: 5001 }, (_, i) => ({
             id: `old-${i}`,
             timestamp: Date.now() - 1000,
             detector: 'tracking' as const,
@@ -118,7 +118,7 @@ describe('storage.addDetectorLog (no key)', () => {
         });
 
         const { detectorLogs } = await chrome.storage.local.get<{ detectorLogs: any }>('detectorLogs');
-        expect(detectorLogs.length).toBeLessThanOrEqual(1000);
+        expect(detectorLogs.length).toBeLessThanOrEqual(5000);
     });
 
     it('respects retention policy and removes old logs', async () => {

@@ -233,7 +233,7 @@ async function flushBufferedTelemetry() {
 
     await mergeArray('piiDetections', bufferedPii, 100);
     await mergeArray('scoreHistory', bufferedScoreHistory, SCORE_HISTORY_LIMIT);
-    await mergeArray('detectorLogs', bufferedDetectorLogs, 1000);
+    await mergeArray('detectorLogs', bufferedDetectorLogs, 5000);
     await mergeArray('notifications', bufferedNotifications, 100);
 
     // Flush Site Cache
@@ -961,17 +961,10 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
         ...(isActiveTab ? { currentSite: slimSiteData(siteData) } : {}),
     }));
 
-    // Step 6: Log the UPS change if there was one (for debugging and history)
+    // Step 6: Prepare the detector journal for this visit. UPS changes are
+    // recorded in scoreHistory (below) with a proper reason - the journal only
+    // holds real detector events, so there is no UPS bookkeeping entry here.
     const detectorLogsToWrite: Array<Omit<DetectorLogEntry, 'id' | 'timestamp'>> = [];
-    if (upsImpact?.message) {
-        detectorLogsToWrite.push({
-            detector: 'permissions',
-            domain: domain,
-            score: 0,
-            details: { upsChange: upsImpact.newUPS - (state.ups ?? 100), newStreak: upsImpact.newStreak },
-            message: upsImpact.message
-        });
-    }
 
     // Append a score-history point only on a genuine navigation; SPA
     // re-analyses of the same page must not duplicate the chart.

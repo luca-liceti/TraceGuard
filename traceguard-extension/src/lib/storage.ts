@@ -33,7 +33,7 @@
  * network requests) can make individual siteCache entries large, and a heavy
  * user can legitimately exceed 10MB. Counts are still bounded:
  * - Clean up old logs based on retention settings
- * - Limit logs to 1000 entries max
+ * - Limit logs to 5000 entries max
  * - Limit notifications to 100 entries max
  * =============================================================================
  *
@@ -174,9 +174,9 @@ async function persistDetectorLogs(
         filteredLogs = logs.filter(l => (now - l.timestamp) < retentionMs);
     }
 
-    // Keep max 1000 logs, remove oldest if exceeded
-    if (filteredLogs.length > 1000) {
-        filteredLogs = filteredLogs.slice(-1000);
+    // Keep max 5000 logs, remove oldest if exceeded
+    if (filteredLogs.length > 5000) {
+        filteredLogs = filteredLogs.slice(-5000);
     }
 
     // Encrypt on write when key is available

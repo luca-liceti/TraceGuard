@@ -231,6 +231,9 @@ export interface SiteRiskData {
  * The possible detector categories.
  * Each detector is responsible for analyzing one aspect of privacy.
  */
+// 'permissions' is retained for backward compatibility: pre-fix builds wrote
+// UPS bookkeeping entries under that label, and stored logs may still contain
+// them (the UI filters them out). New code never writes it.
 export type DetectorType = 'reputation' | 'tracking' | 'cookies' | 'inputs' | 'policy' | 'permissions';
 
 /**

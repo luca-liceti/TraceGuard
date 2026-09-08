@@ -220,18 +220,38 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
         }
     };
 
+    // Negatives (failed lookups) expire far sooner than real ratings, so a
+    // transient cloud outage gets retried within a day instead of a week.
+    const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
+
     // 1. Check dynamic cache first
     const cache = await getCache();
     const cachedEntry = Object.prototype.hasOwnProperty.call(cache, domain) ? cache[domain] : undefined;
     
     if (cachedEntry) {
-        const isStale = (Date.now() - cachedEntry.timestamp) > refreshMs;
+        const isNegative = cachedEntry.data?.found === false;
+        const ttlMs = isNegative ? NEGATIVE_TTL_MS : refreshMs;
+        const isStale = (Date.now() - cachedEntry.timestamp) > ttlMs;
         if (isStale) {
             console.log(`[ToS;DR] Cached rating stale for ${domain}, triggering lazy update`);
             triggerLazyUpdate(); // fire and forget
         } else {
             console.log(`[ToS;DR] Cache hit for ${domain}`);
         }
+
+        // A negative (found:false) result must never shadow a bundled seed
+        // rating: a transient cloud failure would otherwise hide known-good
+        // local data for up to refreshDays. Check the seed first; only trust
+        // the cached "not found" when the seed agrees it has no rating.
+        if (isNegative) {
+            const seedMap = await getTosDRMap();
+            const seedResult = Object.prototype.hasOwnProperty.call(seedMap, domain) ? seedMap[domain] : undefined;
+            if (seedResult) {
+                console.log(`[ToS;DR] Negative cache overridden by bundled seed for ${domain}`);
+                return seedResult as TosDRResult;
+            }
+        }
+
         return cachedEntry.data;
     }
     

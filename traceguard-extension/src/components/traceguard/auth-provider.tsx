@@ -50,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false)
+  const [backoffSeconds, setBackoffSeconds] = useState(0)
   const failedAttemptsRef = useRef(0)
 
   const checkAuth = async () => {
@@ -191,8 +192,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return true
     } catch (err: any) {
       // Progressive backoff: slows down brute-force attempts from the UI.
+      // Show a live countdown so the wait never looks like a frozen button.
       failedAttemptsRef.current += 1
-      await new Promise(r => setTimeout(r, Math.min(30000, 500 * failedAttemptsRef.current)))
+      const waitMs = Math.min(30000, 500 * failedAttemptsRef.current)
+      const totalSeconds = Math.ceil(waitMs / 1000)
+      setBackoffSeconds(totalSeconds)
+      setError(totalSeconds > 1
+        ? t("Too many attempts — retrying in {{seconds}}s", { seconds: totalSeconds })
+        : t("Incorrect Master Password"))
+      const startedAt = Date.now()
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          const remaining = Math.max(0, Math.ceil((waitMs - (Date.now() - startedAt)) / 1000))
+          setBackoffSeconds(remaining)
+          if (remaining <= 0) resolve()
+          else setTimeout(tick, 200)
+        }
+        tick()
+      })
+      setBackoffSeconds(0)
       setError(t("Incorrect Master Password"))
       return false
     } finally {
@@ -388,20 +406,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     <span>{error}</span>
                   </div>
                 )}
-                <Button type="submit" className="w-full" disabled={loading || !password}>
+                <Button type="submit" className="w-full" disabled={loading || backoffSeconds > 0 || !password}>
                   <Key className="mr-2 h-4 w-4" />
-                  {loading ? t("Unlocking...") : t("Unlock Vault")}
+                  {backoffSeconds > 0
+                    ? t("Retrying in {{seconds}}s", { seconds: backoffSeconds })
+                    : loading ? t("Unlocking...") : t("Unlock Vault")}
                 </Button>
               </div>
             </form>
             <div className="mt-4 text-balance text-center text-xs text-muted-foreground [&_button]:underline [&_button]:underline-offset-4 hover:[&_button]:text-primary">
+              {t("Forgot password?")}{" "}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <button
                     type="button"
                     disabled={loading}
                   >
-                    {t("Forgot password? Reset vault")}
+                    {t("Reset vault")}
                   </button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>

@@ -24,7 +24,6 @@ import {
   DropdownMenuItem,
   DropdownMenuPortal,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -90,7 +89,6 @@ export function NavFooter({ user }: { user: { name: string, email: string } }) {
               <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
                 <Settings className="mr-2 size-4" />
                 {t("Settings")}
-                <DropdownMenuShortcut>{t("Ctrl ⇧ ,")}</DropdownMenuShortcut>
               </DropdownMenuItem>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>

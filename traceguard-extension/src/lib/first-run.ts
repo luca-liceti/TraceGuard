@@ -24,6 +24,17 @@
 export async function redirectToDashboardIfFirstRun(): Promise<boolean> {
     const local = await chrome.storage.local.get(['cryptoSalt', 'validator']);
     if (local.cryptoSalt && local.validator) return false;
-    await chrome.tabs.create({ url: chrome.runtime.getURL('src/dashboard/index.html') });
+    const dashboardUrl = chrome.runtime.getURL('src/dashboard/index.html');
+    // Reuse an already-open dashboard tab instead of stacking a new one on
+    // every toolbar click while the vault hasn't been created yet.
+    const existing = await chrome.tabs.query({ url: `${dashboardUrl}*` });
+    if (existing.length > 0 && existing[0].id !== undefined) {
+        await chrome.tabs.update(existing[0].id, { active: true });
+        if (existing[0].windowId !== undefined) {
+            await chrome.windows.update(existing[0].windowId, { focused: true });
+        }
+    } else {
+        await chrome.tabs.create({ url: dashboardUrl });
+    }
     return true;
 }

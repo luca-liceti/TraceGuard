@@ -165,7 +165,6 @@ export function calculateWSS(breakdown: ScoreBreakdown): number {
         weights.fingerprinting = weights.fingerprinting / otherTotal;
         weights.input = weights.input / otherTotal;
 
-        console.log(`[WSS] Policy excluded (fallback score ${validatedBreakdown.policy}) - weight redistributed`);
     }
 
     // STEP 5: Calculate how much each detector contributes to the final score
@@ -189,25 +188,5 @@ export function calculateWSS(breakdown: ScoreBreakdown): number {
         contributions.policy;
 
     // Validate the final score (round it and ensure it's 0-100)
-    const finalScore = validateScore(totalWeightedScore);
-
-    // STEP 7: Log the calculation details for debugging and transparency
-    // This creates a nice "tree" view in the console
-    console.log(`[WSS Calculation] Website Safety Score for current page`);
-    console.log(`├── Reputation: ${validatedBreakdown.reputation} × ${(weights.reputation * 100).toFixed(0)}% = ${contributions.reputation.toFixed(2)}`);
-    console.log(`├── Tracking: ${validatedBreakdown.tracking} × ${(weights.tracking * 100).toFixed(0)}% = ${contributions.tracking.toFixed(2)}`);
-    console.log(`├── Cookies: ${validatedBreakdown.cookies} × ${(weights.cookies * 100).toFixed(0)}% = ${contributions.cookies.toFixed(2)}`);
-    console.log(`├── Fingerprinting: ${validatedBreakdown.fingerprinting} × ${(weights.fingerprinting * 100).toFixed(0)}% = ${contributions.fingerprinting.toFixed(2)}`);
-    console.log(`├── Input: ${validatedBreakdown.input} × ${(weights.input * 100).toFixed(0)}% = ${contributions.input.toFixed(2)}`);
-    if (!isPolicyFallback) {
-        console.log(`├── Policy: ${validatedBreakdown.policy} × ${(weights.policy * 100).toFixed(0)}% = ${contributions.policy.toFixed(2)}`);
-    } else {
-        console.log(`├── Policy: EXCLUDED (no ToS;DR rating)`);
-    }
-    console.log(`├── Sum: ${totalWeightedScore.toFixed(2)}`);
-
-    // Add a nice emoji indicator of the safety level
-    console.log(`└── Final WSS: ${finalScore} (${finalScore >= 80 ? '✅ Safe' : finalScore >= 60 ? '🔵 Low Risk' : finalScore >= 40 ? '🟡 Medium' : finalScore >= 20 ? '🟠 High Risk' : '🔴 Critical'})`);
-
-    return finalScore;
+    return validateScore(totalWeightedScore);
 }

@@ -54,10 +54,9 @@ export function SectionCards() {
   const piiYesterday = piiLogs.filter(log => log.timestamp >= startOfYesterday && log.timestamp < startOfToday).length
   const piiTrend = formatTrend(piiToday, piiYesterday)
 
-  // 4. Safe Browsing Streak
+  // 4. Safe Browsing Streak (no trend — streak history isn't tracked, so any
+  // percentage here would be a misleading proxy)
   const streak = appState?.safeVisitStreak || 0
-  const streakPercent = sitesToday > 0 ? Math.round((sitesToday / Math.max(totalSites, 1)) * 100) : 0
-  const streakTrend = totalSites === 0 || totalSites === sitesToday ? "—" : (streakPercent >= 0 ? `+${streakPercent}%` : `${streakPercent}%`)
 
   // ─── Enriched aggregates from site cache ───────────────────────────────────
 
@@ -154,11 +153,6 @@ export function SectionCards() {
         title={t("Safe Browsing Streak")}
         value={totalSites === 0 ? "—" : streak.toLocaleString()}
         subtitle={totalSites === 0 ? t("Visit some websites first") : t("Consecutive safe visits")}
-        trend={{
-          direction: streakPercent >= 0 ? "up" : "down",
-          value: streakTrend,
-          isPositive: streakPercent >= 0
-        }}
       />
 
       <StatCard

@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { getGradeTextColor, getSafetyBgColor, getSafetyTextColor } from "@/lib/theme-utils"
+import { getSafetyLevel } from "@/lib/risk-utils"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { storage } from "@/lib/storage"
 import { downloadJson } from "@/lib/export"
@@ -683,18 +684,51 @@ export function DataTable({
     const domainToView = searchParams.get('viewSite')
     // Optional deep-link target, e.g. `section=inputs` from a PII notification
     const sectionToView = searchParams.get('section') ?? undefined
-    if (domainToView && data.length > 0) {
-      const visit = data.find(v => v.domain === domainToView)
-      if (visit) {
-        setSelectedVisit(visit)
-        setHighlightSection(sectionToView)
-        setIsDetailsOpen(true)
-        searchParams.delete('viewSite')
-        searchParams.delete('section')
-        setSearchParams(searchParams, { replace: true })
+    if (!domainToView) return
+
+    // Prefer the journal row, then fall back to the site cache (detector logs
+    // are capped at ~200 visits, so a notification for an older site would
+    // otherwise silently do nothing).
+    const visit = data.find(v => v.domain === domainToView)
+    let opened = false
+    if (visit) {
+      setSelectedVisit(visit)
+      opened = true
+    } else {
+      const cached = siteCache[domainToView]
+      if (cached) {
+        const levelName = ({
+          excellent: "Excellent",
+          good: "Good",
+          fair: "Fair",
+          poor: "Poor",
+          critical: "Critical",
+        } as const)[getSafetyLevel(cached.wss)]
+        setSelectedVisit({
+          id: `cached-${domainToView}`,
+          domain: domainToView,
+          timestamp: typeof cached.lastAnalyzed === 'number' ? cached.lastAnalyzed : Date.now(),
+          wss: cached.wss,
+          safetyLevel: levelName,
+          trackers: cached.enrichedDetails?.trackers?.summary?.total ?? 0,
+          cookies: cached.enrichedDetails?.cookies?.summary?.total ?? 0,
+          inputs: (cached.detectionDetails?.input?.sensitive ?? 0) > 0 ? "Yes" : "No",
+          reputation: cached.breakdown?.reputation === 100
+            ? "Clean"
+            : cached.breakdown?.reputation === 0 ? "Blacklisted" : "Suspicious",
+          policy: cached.detectionDetails?.policy?.grade ?? "N/A",
+        })
+        opened = true
       }
     }
-  }, [searchParams, data, setSearchParams])
+    if (opened) {
+      setHighlightSection(sectionToView)
+      setIsDetailsOpen(true)
+      searchParams.delete('viewSite')
+      searchParams.delete('section')
+      setSearchParams(searchParams, { replace: true })
+    }
+  }, [searchParams, data, siteCache, setSearchParams])
 
   // Reset to first page when filter or page size changes
   React.useEffect(() => { setPageIndex(0) }, [domainFilter, pageSize])

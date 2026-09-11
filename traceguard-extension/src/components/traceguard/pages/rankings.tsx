@@ -44,6 +44,7 @@ import {
   Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isThreatLog } from "@/lib/risk-utils"
 
 // ─── Semantic color palette (detector-aware) ───────────────────────────────
 // Using standard shadcn theme colors
@@ -91,7 +92,7 @@ const PII_COLORS: Record<string, string> = {
 
 // Chart configs
 const getActivityConfig = (t: any): ChartConfig => ({
-  events: { label: t("Events Blocked"), color: "var(--primary)" }
+  events: { label: t("Events Detected"), color: "var(--primary)" }
 })
 
 const leaderboardConfig = {
@@ -134,7 +135,9 @@ function EmptyState({ icon: Icon, title, description }: { icon: React.ComponentT
 export default function RankingsPage() {
   const { t } = useTranslation()
   const rawLogs = useDetectorLogs()
-  const logs = useMemo(() => rawLogs.filter(l => l.detector !== 'permissions'), [rawLogs])
+  // Only actual privacy findings count as "threats" — every page visit
+  // otherwise produces one routine (often "all clear") log per detector.
+  const logs = useMemo(() => rawLogs.filter(l => l.detector !== 'permissions' && isThreatLog(l)), [rawLogs])
   const piiLogs = useActivityLogs()
   const { sites } = useSiteCache()
   const settings = useSettings()
@@ -330,7 +333,7 @@ export default function RankingsPage() {
         <StatCard
           title={t("Total Threats Blocked")}
           value={heroStats.totalThreats.toLocaleString()}
-          subtitle={t("All detector events logged")}
+          subtitle={t("Detected privacy risk events")}
           trend={{
             direction: heroStats.threatDirection as "up" | "down",
             value: heroStats.threatTrend,
@@ -370,7 +373,7 @@ export default function RankingsPage() {
             <CardTitle>{t("Activity Volume")}</CardTitle>
             <CardDescription>
               <span className="@[540px]/card:block hidden">
-                {t("Volume of privacy events blocked")}{" "}
+                {t("Volume of privacy risks detected")}{" "}
                 {timeRange === "1d" ? t("today") : timeRange === "7d" ? t("over the last 7 days") : t("over the last 30 days")}
               </span>
               <span className="@[540px]/card:hidden">

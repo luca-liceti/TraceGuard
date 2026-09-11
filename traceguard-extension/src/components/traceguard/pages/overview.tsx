@@ -64,7 +64,11 @@ export default function OverviewPage() {
         totalWeight += weight
       }
 
-      const wss = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0
+      // Prefer the canonical WSS from the site cache (computed by the
+      // background scorer) so the table always matches the popup/side panel
+      // for the same site. Fall back to a local weighted average only for
+      // domains the cache no longer holds (e.g. after a cache clear).
+      const wss = siteCache[group.domain]?.wss ?? (totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0)
       const safetyLevel = getSafetyLevel(wss)
       
       const cachedDetails = siteCache[group.domain]?.detectionDetails || {};

@@ -1,4 +1,4 @@
-import { ShieldUser, Flame, Lock, OctagonAlert } from "lucide-react"
+import { ShieldUser, Flame, Lock } from "lucide-react"
 import { useAppState, useCurrentSite } from "@/lib/useStorage"
 import { useAuth } from "@/components/traceguard/auth-provider"
 import { Button } from "@/components/ui/button"
@@ -12,29 +12,23 @@ import { SiteDetails } from "@/components/sidepanel/site-details"
 import { Actions } from "@/components/sidepanel/actions"
 
 /**
- * Small helper component for the header lock status
+ * Small helper component for the header lock status. Children only render
+ * while the vault is unlocked (AuthProvider shows the full-screen lock form
+ * otherwise), so this is always the lock action.
  */
 function HeaderAuthStatus({ t }: { t: any }) {
-    const { authState, lock } = useAuth();
-
-    if (authState === "unlocked") {
-        return (
-            <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                onClick={() => lock()}
-                title={t("Lock Vault")}
-            >
-                <Lock className="h-4 w-4" />
-            </Button>
-        );
-    }
+    const { lock } = useAuth();
 
     return (
-        <div className="flex items-center justify-center h-8 w-8 text-destructive animate-pulse" title={t("Vault Locked")}>
-            <OctagonAlert className="h-4 w-4" />
-        </div>
+        <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            onClick={() => lock()}
+            title={t("Lock Vault")}
+        >
+            <Lock className="h-4 w-4" />
+        </Button>
     );
 }
 

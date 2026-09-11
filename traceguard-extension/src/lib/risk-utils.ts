@@ -341,3 +341,31 @@ export function getTrackingLevel(trackingScore: number): SafetyLevel {
 export function getTrackingColor(trackingScore: number): string {
     return SAFETY_CONFIGS[getTrackingLevel(trackingScore)].color;
 }
+
+/**
+ * True when a detector log entry represents an actual privacy finding, as
+ * opposed to a routine "all clear" scan. Every page visit produces one log per
+ * detector (clean or not), so the Rankings statistics must filter on this to
+ * avoid counting benign scans as threats.
+ *
+ * Thresholds mirror the background worker's detector messages: reputation is
+ * clean only at 100, tracking is a finding when any tracker was counted,
+ * cookies/inputs are findings below 80 (sensitive fields/scripts present), and
+ * policy is a finding below 80 except the neutral 50 ("link found, no rating").
+ */
+export function isThreatLog(log: { detector: string; score: number; details?: any }): boolean {
+    switch (log.detector) {
+        case 'reputation':
+            return log.score < 100;
+        case 'tracking':
+            return (log.details?.trackerCount ?? 0) > 0;
+        case 'cookies':
+            return log.score < 80;
+        case 'inputs':
+            return log.score < 80;
+        case 'policy':
+            return log.score < 80 && log.score !== 50;
+        default:
+            return false;
+    }
+}

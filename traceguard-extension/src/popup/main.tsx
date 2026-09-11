@@ -8,10 +8,11 @@ import { useSettings } from '@/lib/useStorage'
 import { redirectToDashboardIfFirstRun } from '@/lib/first-run'
 import '@/styles/globals.css'
 import '@/lib/i18n'
-import { installGlobalErrorHandlers, logEvent } from '@/lib/diagnostics'
+import { installGlobalErrorHandlers, logEvent, setDiagnosticContext } from '@/lib/diagnostics'
 
 // Capture uncaught errors thrown anywhere in the popup context.
 installGlobalErrorHandlers()
+setDiagnosticContext('popup')
 
 function Root() {
     const settings = useSettings();

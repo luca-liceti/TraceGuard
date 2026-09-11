@@ -31,7 +31,7 @@
 
 import { storage, readBuffer, writeBuffer } from '../lib/storage';
 import { recordError } from '../lib/error-log';
-import { captureError, installGlobalErrorHandlers, logEvent, setDevMode } from '../lib/diagnostics';
+import { captureError, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
 import { z } from 'zod';
 import { loadBlacklist, checkReputation, refreshBlacklistFromRemote } from './services/reputation';
 import { calculateWSS, calculateTrackingScore } from '../lib/scoring';
@@ -261,6 +261,7 @@ async function flushBufferedTelemetry() {
 // Capture uncaught errors and unhandled rejections from the moment the worker
 // starts. Without this, a throw in any async path here disappears silently.
 installGlobalErrorHandlers();
+setDiagnosticContext('background');
 
 // Initialize the network monitor right away to start observing web requests
 initNetworkMonitor();
@@ -1146,6 +1147,22 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
             actionUrl: `/overview?viewSite=${encodeURIComponent(domain)}`
         });
     }
+
+    // Verbose scoring summary. The 1.4.3 cleanup deleted the console.log that
+    // printed this, which left the final WSS and its detector breakdown
+    // unobservable. Developer mode is now the only place to read them without
+    // attaching a debugger. Note that a 100 here can mean a clean page or a
+    // detector that threw and fell back to a neutral score.
+    logEvent('scoring', 'debug', 'page_analysis_complete', `${domain} scored ${wss}`, {
+        host: domain,
+        wss,
+        isNewNavigation,
+        reputation: finalScores.reputation,
+        tracking: finalScores.tracking,
+        cookies: finalScores.cookies,
+        input: finalScores.input,
+        policy: finalScores.policy,
+    });
 
 }
 

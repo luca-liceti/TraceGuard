@@ -2,6 +2,17 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.5.1
+
+**What was fixed**
+
+- Browser layout warnings such as `ResizeObserver loop completed with undelivered notifications.` are no longer recorded as errors. They are not failures, and on the dashboard they were filling the error log and the Errors section of the copied diagnostics bundle. They still appear in the developer mode timeline, so nothing is hidden.
+- Uncaught errors and unhandled promise rejections now name the context that raised them (background, content, popup, side panel, or dashboard). Every one of them used to be reported as "ui", which made a content script crash look like a dashboard crash.
+
+**What's new**
+
+- Developer mode records a scoring summary for every analyzed page: the final safety score plus the score from each detector. This replaces the completion line that the 1.4.3 console cleanup removed, so a score can now be traced back to the detectors that produced it.
+
 ## v1.5.0
 
 **What's new**

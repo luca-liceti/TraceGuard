@@ -36,7 +36,7 @@ import { piiDetector } from './pii-detector';  // Monitors sensitive input field
 import { showPIIConfirmCard } from './pii-confirm';  // "Is this website safe?" popup
 import { showToast } from './toast';                 // In-page toast notifications
 import { isLocalUrl } from '../lib/utils'; // Helps identify local network addresses
-import { captureError, installGlobalErrorHandlers, logEvent } from '../lib/diagnostics';
+import { captureError, installGlobalErrorHandlers, logEvent, setDiagnosticContext } from '../lib/diagnostics';
 
 
 // =============================================================================
@@ -118,6 +118,7 @@ const debouncedAnalysis = debounce(runAnalysis, 1000);
 // Capture uncaught errors thrown anywhere in this content script into the
 // shared diagnostics stream, so an unwritten catch cannot hide a failure.
 installGlobalErrorHandlers();
+setDiagnosticContext('content');
 
 // Run initial analysis (a genuine document load)
 runAnalysis(true);

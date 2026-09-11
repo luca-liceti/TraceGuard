@@ -11,10 +11,11 @@ import { ShieldUser } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import '@/styles/globals.css'
 import '@/lib/i18n'
-import { installGlobalErrorHandlers, logEvent } from '@/lib/diagnostics'
+import { installGlobalErrorHandlers, logEvent, setDiagnosticContext } from '@/lib/diagnostics'
 
 // Capture uncaught errors thrown anywhere in the side panel context.
 installGlobalErrorHandlers()
+setDiagnosticContext('sidepanel')
 
 /**
  * First-run UX: like the popup, a fresh install opens the full dashboard tab

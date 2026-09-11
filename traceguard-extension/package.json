@@ -1,6 +1,6 @@
 {
   "name": "traceguard-extension",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Real-time privacy scoring and protection Chrome extension with WSS/UPS metrics",
   "main": "index.js",
   "scripts": {

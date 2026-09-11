@@ -29,6 +29,7 @@
  * USAGE:
  * ```ts
  * installGlobalErrorHandlers();                      // once per context
+ * setDiagnosticContext('sidepanel');                 // label this context
  * setDevMode(settings.devMode === true);             // sync from settings
  * logEvent('detector', 'warn', 'cookie_detector_failed', 'Cookie scan threw');
  * captureError('content', error, 'page_analysis_failed');
@@ -90,6 +91,9 @@ const MAX_FIELD_CHARS = 400;
 let devMode = false;
 let events: DiagnosticEvent[] = [];
 let handlersInstalled = false;
+// Which context this instance of the module lives in. Every context installs
+// the global handlers, so an uncaught error has to say where it came from.
+let diagnosticContext: DiagnosticArea = 'ui';
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<(events: DiagnosticEvent[]) => void>();
 
@@ -147,6 +151,23 @@ function notify(): void {
 }
 
 // -----------------------------------------------------------------------------
+// Context label
+// -----------------------------------------------------------------------------
+
+/**
+ * Labels this context so events written by the global handlers can be traced
+ * back to the popup, the dashboard, a content script, or the worker. Without
+ * it, a content-script crash and a dashboard crash both read as "ui".
+ */
+export function setDiagnosticContext(area: DiagnosticArea): void {
+    diagnosticContext = area;
+}
+
+export function getDiagnosticContext(): DiagnosticArea {
+    return diagnosticContext;
+}
+
+// -----------------------------------------------------------------------------
 // Developer mode
 // -----------------------------------------------------------------------------
 
@@ -160,7 +181,9 @@ export function setDevMode(enabled: boolean): void {
     if (enabled) {
         // Re-read anything another context already wrote, then announce itself.
         void refreshSessionEvents();
-        logEvent('ui', 'info', 'dev_mode_enabled', 'Developer mode enabled');
+        logEvent(diagnosticContext, 'info', 'dev_mode_enabled', 'Developer mode enabled', {
+            context: diagnosticContext,
+        });
     }
 }
 
@@ -407,6 +430,25 @@ export async function clearErrorLog(): Promise<void> {
 // -----------------------------------------------------------------------------
 
 /**
+ * Browser-generated `error` events that are not failures.
+ *
+ * The first real diagnostics bundle exported from a 1.5.0 install contained
+ * exactly one "error", `ResizeObserver loop completed with undelivered
+ * notifications.`, which Chrome fires as a window `error` event on any layout
+ * with a ResizeObserver. Nothing is broken, but it lands in the durable error
+ * log (capped at 100 entries) and crowds out real crashes. These are recorded
+ * at debug instead, so developer mode can still prove they happened while the
+ * durable log stays meaningful.
+ */
+const BENIGN_ERROR_PATTERNS: RegExp[] = [
+    /^ResizeObserver loop (limit exceeded|completed with undelivered notifications)/,
+];
+
+function isBenignBrowserNoise(message: string): boolean {
+    return BENIGN_ERROR_PATTERNS.some(pattern => pattern.test(message));
+}
+
+/**
  * Installs `error` and `unhandledrejection` handlers on the current global.
  * Works in both the service worker and page contexts: the handler is attached
  * to `globalThis`, and a module-level flag keeps double installation harmless.
@@ -426,15 +468,21 @@ export function installGlobalErrorHandlers(): void {
         // not actionable here, so only capture real script errors.
         const error = event?.error;
         if (!error && !event?.message) return;
-        captureError('ui', error ?? event.message, 'uncaught_error', {
+        const location = {
             source: event?.filename,
             line: event?.lineno,
             column: event?.colno,
-        });
+        };
+        // Keep the durable error log free of browser noise that is not a failure.
+        if (!error && typeof event?.message === 'string' && isBenignBrowserNoise(event.message)) {
+            logEvent(diagnosticContext, 'debug', 'benign_browser_noise', event.message, location);
+            return;
+        }
+        captureError(diagnosticContext, error ?? event.message, 'uncaught_error', location);
     };
 
     const onRejection = (event: any) => {
-        captureError('ui', event?.reason ?? 'Unhandled promise rejection', 'unhandled_rejection');
+        captureError(diagnosticContext, event?.reason ?? 'Unhandled promise rejection', 'unhandled_rejection');
     };
 
     target.addEventListener('error', onError);

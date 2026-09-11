@@ -15,6 +15,7 @@ import {
     normalizeError,
     refreshSessionEvents,
     setDevMode,
+    setDiagnosticContext,
 } from './diagnostics';
 
 /**
@@ -32,6 +33,11 @@ function dispatchRejection(reason: unknown) {
     const event = new Event('unhandledrejection') as Event & { reason?: unknown };
     event.reason = reason;
     window.dispatchEvent(event);
+}
+
+/** Chrome fires layout warnings as `error` events carrying no Error object. */
+function dispatchBrowserNoise(message: string) {
+    window.dispatchEvent(new ErrorEvent('error', { message }));
 }
 
 describe('diagnostics', () => {
@@ -62,6 +68,38 @@ describe('diagnostics', () => {
         const errors = getSessionEvents().filter(entry => entry.event === 'unhandled_rejection');
         expect(errors).toHaveLength(1);
         expect(errors[0].message).toContain('rejected');
+    });
+
+    it('labels uncaught errors with the context that raised them', () => {
+        setDiagnosticContext('dashboard');
+        installGlobalErrorHandlers();
+
+        dispatchError('crashed in the dashboard');
+
+        const [entry] = getSessionEvents().filter(item => item.event === 'uncaught_error');
+        expect(entry.area).toBe('dashboard');
+    });
+
+    it('keeps browser noise out of the durable error log', async () => {
+        installGlobalErrorHandlers();
+
+        dispatchBrowserNoise('ResizeObserver loop completed with undelivered notifications.');
+        await flushDiagnostics();
+
+        // It is not a failure, so it must not reach the Settings error log.
+        expect(await getErrorLog()).toHaveLength(0);
+        expect(getSessionEvents().filter(entry => entry.level === 'error')).toHaveLength(0);
+    });
+
+    it('still records browser noise at debug while developer mode is on', () => {
+        setDevMode(true);
+        installGlobalErrorHandlers();
+
+        dispatchBrowserNoise('ResizeObserver loop limit exceeded');
+
+        const [entry] = getSessionEvents().filter(item => item.event === 'benign_browser_noise');
+        expect(entry.level).toBe('debug');
+        expect(entry.message).toContain('ResizeObserver');
     });
 
     it('installs the global handlers only once', () => {

@@ -2,6 +2,12 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.6
+
+**What was fixed**
+
+- The Overview page header now has a subtitle describing what the page shows (your privacy score, activity trends, and the sites you have visited), matching the Rankings & Stats page. It is translated in Spanish, French, and German like the rest of the interface.
+
 ## v1.7.5
 
 **What was fixed**

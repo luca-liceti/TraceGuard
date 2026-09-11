@@ -147,7 +147,13 @@ export default function OverviewPage() {
 
   return (
     <>
-      <h1 className="text-3xl font-bold tracking-tight">{t("Overview")}</h1>
+      {/* Page Header */}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">{t("Overview")}</h1>
+        <p className="text-muted-foreground mt-2">
+          {t("Your privacy score, activity trends, and the sites you have visited.")}
+        </p>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-1 h-full">
           <RadialChartScore timeRange={timeRange} />

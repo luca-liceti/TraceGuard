@@ -13,7 +13,7 @@
 - One logical change per commit. Never bundle unrelated edits, and never sweep pre-existing dirty files into a commit for work you did not do.
 - Use the repository's conventional style (`fix:`, `feat:`, `chore:`, `docs:`, `refactor:`, `test:`) and name the user-facing effect.
 - Every commit and push is authored and committed as `Luca <lucaliceti+github@protonmail.com>`. Pass it per command (`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`, or `git commit --author`), and never edit the git config to change it.
-- Never credit an AI tool in this repository. No `Generated with ...` trailer, no `Co-Authored-By: Codebuff` line, and no other reference to Codebuff or any assistant in commit messages, code, comments, or docs.
+- Never credit an AI tool or assistant in this repository. No `Generated with ...` trailer, no `Co-Authored-By` line naming an assistant, and no other assistant reference in commit messages, code, comments, docs, changelogs, or PR text.
 - Include the version bump and the `CHANGELOG.md` entry in the same commit as the change they describe.
 - Pushing stays explicit: commit locally every change, but run `git push` only when the user asks or when releasing (see Releasing). Never force-push and never rewrite history.
 

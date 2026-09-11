@@ -116,7 +116,7 @@ open_test_sites.ps1
 key.pem
 *.key
 
-# Local AI/agent tooling state (not part of the project)
+# Local AI tooling state (not part of the project).
+# Exception: .agents/AGENTS.md holds the project rules and IS tracked.
 .freebuff/
-.agents/
 

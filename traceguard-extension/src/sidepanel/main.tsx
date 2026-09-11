@@ -8,10 +8,13 @@ import { useSettings } from '@/lib/useStorage'
 import { redirectToDashboardIfFirstRun } from '@/lib/first-run'
 import { Button } from '@/components/ui/button'
 import { ShieldUser } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import '@/styles/globals.css'
 import '@/lib/i18n'
+import { installGlobalErrorHandlers, logEvent } from '@/lib/diagnostics'
 
-console.log('Mounting Sidepanel...');
+// Capture uncaught errors thrown anywhere in the side panel context.
+installGlobalErrorHandlers()
 
 /**
  * First-run UX: like the popup, a fresh install opens the full dashboard tab
@@ -20,6 +23,7 @@ console.log('Mounting Sidepanel...');
  * below then swaps in the normal app without needing a reopen.
  */
 function Root() {
+    const { t } = useTranslation();
     const settings = useSettings();
     const [ready, setReady] = useState(false);
 
@@ -29,9 +33,10 @@ function Root() {
             try {
                 const redirected = await redirectToDashboardIfFirstRun();
                 if (!cancelled) setReady(!redirected);
-            } catch {
+            } catch (error) {
                 // If the check fails (e.g. storage unavailable), fall back to
                 // the normal panel UI rather than leaving a placeholder.
+                logEvent('sidepanel', 'warn', 'first_run_check_failed', 'Could not check first-run state', { error: String(error) });
                 if (!cancelled) setReady(true);
             }
         };
@@ -55,14 +60,14 @@ function Root() {
         return (
             <div className="flex h-full flex-col items-center justify-center gap-3 bg-background p-6 text-center text-sm text-muted-foreground">
                 <ShieldUser className="h-8 w-8 text-foreground" />
-                <p>Create your TraceGuard vault to get started.</p>
+                <p>{t("Create your TraceGuard vault to get started.")}</p>
                 <Button
                     size="sm"
                     onClick={() => {
                         chrome.tabs.create({ url: chrome.runtime.getURL('src/dashboard/index.html') });
                     }}
                 >
-                    Open dashboard
+                    {t("Open Dashboard")}
                 </Button>
             </div>
         );
@@ -85,7 +90,6 @@ function Root() {
 
 try {
     const rootElement = document.getElementById('root');
-    console.log('Root element:', rootElement);
 
     if (!rootElement) {
         console.error('Failed to find root element');
@@ -97,7 +101,6 @@ try {
                 </ErrorBoundary>
             </React.StrictMode>,
         )
-        console.log('Sidepanel mounted');
     }
 } catch (error) {
     console.error('Error mounting sidepanel:', error);

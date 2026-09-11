@@ -2,6 +2,20 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.5.0
+
+**What's new**
+
+- Developer mode (Settings, About): a verbose on-device diagnostics log. Turn it on while troubleshooting, then click "Copy diagnostics" to copy a ready-to-paste bundle containing your extension version, browser, every recorded error, and the full event timeline. It is off by default, stays on your device, and is cleared when you close the browser.
+- The extension now catches errors that no code path handled. Uncaught errors and unhandled promise rejections are recorded in the background worker, the content script, the popup, the side panel, and the dashboard, so failures surface in the diagnostics bundle instead of disappearing.
+
+**What was fixed**
+
+- Failures that used to vanish silently now leave a trace: detector errors, storage quota exhaustion, page-analysis delivery failures, and first-run check failures are all recorded.
+- A thrown error inside the cookie detector no longer looks identical to a clean page in the diagnostics log.
+- React crash screens now record the component stack alongside the error.
+- Removed the last stray `console.log` from the policy detector.
+
 ## v1.4.3
 
 **What's new**

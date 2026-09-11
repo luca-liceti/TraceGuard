@@ -31,6 +31,7 @@
 
 import { storage, readBuffer, writeBuffer } from '../lib/storage';
 import { recordError } from '../lib/error-log';
+import { captureError, installGlobalErrorHandlers, logEvent, setDevMode } from '../lib/diagnostics';
 import { z } from 'zod';
 import { loadBlacklist, checkReputation, refreshBlacklistFromRemote } from './services/reputation';
 import { calculateWSS, calculateTrackingScore } from '../lib/scoring';
@@ -257,15 +258,26 @@ async function flushBufferedTelemetry() {
     console.log('[Vault] Buffered telemetry flushed to encrypted storage.');
 }
 
-// This message appears in the browser's developer console to confirm the script is running
-console.log('TraceGuard Background Service Worker Running');
+// Capture uncaught errors and unhandled rejections from the moment the worker
+// starts. Without this, a throw in any async path here disappears silently.
+installGlobalErrorHandlers();
 
 // Initialize the network monitor right away to start observing web requests
 initNetworkMonitor();
 
 // Honor the master on/off toggle for the network monitor as soon as settings
-// are available (and whenever they change below).
-storage.getSettings().then((settings) => setNetworkMonitorEnabled(settings.enabled !== false));
+// are available (and whenever they change below), and sync developer mode so
+// verbose diagnostics start flowing as soon as the worker wakes up.
+storage.getSettings().then((settings) => {
+    setNetworkMonitorEnabled(settings.enabled !== false);
+    setDevMode(settings.devMode === true);
+    logEvent('startup', 'debug', 'service_worker_started', 'Service worker started', {
+        enabled: settings.enabled !== false,
+        devMode: settings.devMode === true,
+    });
+}).catch(error => {
+    captureError('startup', error, 'settings_load_failed');
+});
 
 // =============================================================================
 // EXTENSION LIFECYCLE EVENTS
@@ -277,8 +289,6 @@ storage.getSettings().then((settings) => setNetworkMonitorEnabled(settings.enabl
  * It sets up all the initial data the extension needs to work properly.
  */
 chrome.runtime.onInstalled.addListener(async () => {
-    console.log('TraceGuard Extension Installed');
-
     // Run data migrations before initializing anything else. Migrations fail
     // loudly on a bad step; log and continue so a transient storage error never
     // bricks the extension's startup path.
@@ -521,6 +531,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return;
     }
 
+    // Verbose only: gives the exported log the message sequence around a
+    // failure, which is usually what makes one reproducible.
+    logEvent('background', 'debug', 'message_received', String(message?.type ?? 'unknown'), {
+        tabId: _sender.tab?.id,
+    });
+
     // Any message from the extension counts as activity, reset the idle timer.
     armAutoLock();
 
@@ -601,7 +617,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // This helps us track potential privacy exposure
     // -------------------------------------------------------------------------
     if (message.type === 'PII_DETECTED') {
-        queueTelemetryWrite(() => handlePIIDetection(message)).then(() => {
+        // Remember which tab emitted the event so the confirmation card and
+        // toast appear there, not on whatever page happens to be foreground.
+        queueTelemetryWrite(() => handlePIIDetection(message, _sender.tab?.id)).then(() => {
             sendResponse({ success: true });
         }).catch(error => {
             recordError('PII detection failed', String(error));
@@ -1129,9 +1147,6 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
         });
     }
 
-    // Log completion for debugging purposes
-    console.log('Analysis complete for:', domain, 'WSS:', wss);
-    console.log('[WSS Calculation] Breakdown:', finalScores);
 }
 
 // =============================================================================
@@ -1210,7 +1225,8 @@ const PII_CONFIRM_TIMEOUT_MS = 120_000; // 2 minutes
 async function askForSiteConfirmation(
     event: { site: string; fieldType: string },
     decision: PIIEntryDecision,
-    siteWSS: number
+    siteWSS: number,
+    tabId?: number
 ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
         const finish = (safe: boolean) => {
@@ -1227,29 +1243,57 @@ async function askForSiteConfirmation(
         const timer = setTimeout(() => finish(false), PII_CONFIRM_TIMEOUT_MS);
         pendingPIIConfirms.set(event.site, { resolve: finish, timer });
 
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]?.id) {
-                chrome.tabs.sendMessage(tabs[0].id, {
-                    type: 'SHOW_PII_CONFIRM',
-                    data: {
-                        domain: event.site,
-                        fieldType: event.fieldType,
-                        reason: decision.reason,
-                        message: decision.message,
-                        siteWSS,
-                    }
-                }).catch(() => {
-                    // The page may not have the content script (yet) - penalize.
-                    finish(false);
+        // Show the card on the tab that actually emitted the PII event, so a
+        // background tab can't produce a confusing prompt on an unrelated page.
+        // Translate the card here (i18n is already loaded in this worker) and
+        // ship the strings with the message, keeping the content script slim.
+        const texts = {
+            title: i18n.t('Is this website safe?'),
+            dismissLabel: i18n.t('Dismiss'),
+            bodyPrefix: i18n.t('TraceGuard detected personal info ({{fieldType}}) on', { fieldType: event.fieldType }),
+            bodySuffix: i18n.t('and this site doesn\u2019t meet our security checks. Make sure it\u2019s the real site before entering anything.'),
+            confirm: i18n.t('It\u2019s safe - add to allow list'),
+            notSure: i18n.t('Not sure'),
+            note: i18n.t('If this is the real site, confirm to skip the penalty and add it to your allow list. Check the address bar carefully - lookalike domains are a common trick.'),
+            added: i18n.t('Added to allow list'),
+            addedNote: i18n.t('{{domain}} was added to your allow list. TraceGuard won\u2019t penalize personal info here anymore.', { domain: event.site }),
+        };
+        const deliver = (id: number) => {
+            chrome.tabs.sendMessage(id, {
+                type: 'SHOW_PII_CONFIRM',
+                data: {
+                    domain: event.site,
+                    fieldType: event.fieldType,
+                    reason: decision.reason,
+                    message: decision.message,
+                    siteWSS,
+                    texts,
+                }
+            }).catch((error) => {
+                // The page may not have the content script (yet) - penalize.
+                // Expected-absent, so this is a session warning, not a bug.
+                logEvent('pii', 'warn', 'pii_confirm_undeliverable', 'Could not show the PII confirmation card', {
+                    error: String(error),
+                    domain: event.site,
                 });
-            } else {
                 finish(false);
-            }
-        });
+            });
+        };
+        const fallbackToActiveTab = () => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]?.id) deliver(tabs[0].id);
+                else finish(false);
+            });
+        };
+        if (tabId !== undefined) {
+            chrome.tabs.get(tabId).then(() => deliver(tabId)).catch(fallbackToActiveTab);
+        } else {
+            fallbackToActiveTab();
+        }
     });
 }
 
-async function handlePIIDetection(message: any) {
+async function handlePIIDetection(message: any, tabId?: number) {
     const event = message.data;
     console.log('[TraceGuard] PII event:', event);
 
@@ -1302,11 +1346,11 @@ async function handlePIIDetection(message: any) {
         // finalize queue is handled separately so a storage failure there can
         // never re-trigger a second finalize with a different decision.
         const finalizeQueued = (safe: boolean) => {
-            queueTelemetryWrite(() => finalizePIIDetection(event, safe)).catch((error) => {
+            queueTelemetryWrite(() => finalizePIIDetection(event, safe, tabId)).catch((error) => {
                 recordError('PII finalize failed', String(error));
             });
         };
-        askForSiteConfirmation(event, decision, siteWSS)
+        askForSiteConfirmation(event, decision, siteWSS, tabId)
             .then(finalizeQueued)
             .catch((error) => {
                 recordError('PII confirmation failed', String(error));
@@ -1315,7 +1359,7 @@ async function handlePIIDetection(message: any) {
         return;
     }
 
-    await finalizePIIDetection(event, false);
+    await finalizePIIDetection(event, false, tabId);
 }
 
 /**
@@ -1325,7 +1369,7 @@ async function handlePIIDetection(message: any) {
  * confirmation card: the domain is added to the allow list and the entry is
  * treated as expected use (no penalty).
  */
-async function finalizePIIDetection(event: any, confirmedSafe: boolean) {
+async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: number) {
     // Read existing PII detections and score history first so we can dedupe
     // repeated events for the same field type on the same site.
     const key = await getCryptoKey();
@@ -1491,24 +1535,34 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean) {
     }, key);
 
     // Send a toast notification to the webpage (the little popup message in the corner)
-    // We only do this if the user has notifications enabled in their settings
+    // We only do this if the user has notifications enabled in their settings.
+    // Target the tab that emitted the event so a background tab can't trigger
+    // a toast on an unrelated page; fall back to the active tab if it's gone.
     if (settings.notifications) {
-        // Send a message to the active browser tab to show a toast notification
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]?.id) {
-                chrome.tabs.sendMessage(tabs[0].id, {
-                    type: 'SHOW_TOAST',
-                    data: {
-                        title: i18n.t('TraceGuard Alert'),
-                        message: i18n.t('Sensitive input detected on {{site}}', { site: event.site }),
-                        variant: 'warning'
-                    }
-                }).catch(error => {
-                    // If the toast fails to show, it's not critical - just log it
-                    console.warn('Failed to send toast notification:', error);
-                });
+        const payload = {
+            type: 'SHOW_TOAST',
+            data: {
+                title: i18n.t('TraceGuard Alert'),
+                message: i18n.t('Sensitive input detected on {{site}}', { site: event.site }),
+                variant: 'warning'
             }
-        });
+        };
+        const emit = (id: number) => {
+            chrome.tabs.sendMessage(id, payload).catch(error => {
+                // If the toast fails to show, it's not critical - just log it
+                console.warn('Failed to send toast notification:', error);
+            });
+        };
+        const fallbackToActiveTab = () => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]?.id) emit(tabs[0].id);
+            });
+        };
+        if (tabId !== undefined) {
+            chrome.tabs.get(tabId).then(() => emit(tabId)).catch(fallbackToActiveTab);
+        } else {
+            fallbackToActiveTab();
+        }
     }
 }
 

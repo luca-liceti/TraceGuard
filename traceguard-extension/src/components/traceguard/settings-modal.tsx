@@ -47,6 +47,14 @@ import { ExportDataDialog } from "./export-data-dialog"
 import { ImportDataDialog } from "./import-data-dialog"
 import { storage } from "@/lib/storage"
 import { getErrorLog, clearErrorLog, type ErrorLogEntry } from "@/lib/error-log"
+import {
+    clearSessionEvents,
+    copyDiagnosticsToClipboard,
+    refreshSessionEvents,
+    setDevMode,
+    subscribeEvents,
+    type DiagnosticEvent,
+} from "@/lib/diagnostics"
 import { toast } from '@/components/ui/toast'
 import {
     Bell,
@@ -58,6 +66,7 @@ import {
     Palette,
     HardDrive,
     Info,
+    Copy,
     Download,
     Upload,
     List,
@@ -190,6 +199,7 @@ export function SettingsModal() {
     const { isSettingsOpen, setSettingsOpen, activeTab, setActiveTab } = useSettingsModal()
 
     const [hasChanges, setHasChanges] = useState(false)
+    const [discardOpen, setDiscardOpen] = useState(false)
     const [storageInfo, setStorageInfo] = useState({ bytesInUse: 0, quota: 0 })
     const [manifestVersion, setManifestVersion] = useState("1.0.0")
     const [schemaVersion, setSchemaVersion] = useState(1)
@@ -204,10 +214,17 @@ export function SettingsModal() {
     const [enablePIIDetection, setEnablePIIDetection] = useState(settings?.enablePIIDetection ?? true)
     const [enableCloudTosdr, setEnableCloudTosdr] = useState(settings?.enableCloudTosdr ?? false)
     const [displayMode, setDisplayMode] = useState(settings?.displayMode || "popup")
-    const [autoLockTimeout, setAutoLockTimeout] = useState(settings?.autoLockTimeout ?? -1)
+    // Legacy "Never" (0) behaved exactly like "On Browser Close" (-1): both
+    // simply skip the idle timer, and session storage clears on browser close
+    // either way. Normalize any stored 0 to -1 and drop the redundant option.
+    const [autoLockTimeout, setAutoLockTimeout] = useState(
+        settings?.autoLockTimeout === 0 ? -1 : (settings?.autoLockTimeout ?? -1)
+    )
     const [whitelist, setWhitelist] = useState<string[]>(settings?.whitelist || [])
     const [blacklist, setBlacklist] = useState<string[]>(settings?.blacklist || [])
     const [errorLog, setErrorLog] = useState<ErrorLogEntry[]>([])
+    const [devMode, setDevModeLocal] = useState(settings?.devMode === true)
+    const [sessionEvents, setSessionEvents] = useState<DiagnosticEvent[]>([])
     const [exportOpen, setExportOpen] = useState(false)
     const [importOpen, setImportOpen] = useState(false)
 
@@ -240,6 +257,14 @@ export function SettingsModal() {
         getErrorLog().then(setErrorLog)
     }, [])
 
+    // Live developer-mode stream: subscribe for new events and pull in whatever
+    // the service worker, content script, or another view already recorded.
+    useEffect(() => {
+        const unsubscribe = subscribeEvents(setSessionEvents)
+        void refreshSessionEvents()
+        return unsubscribe
+    }, [])
+
     // Sync local state with stored settings when they load
     useEffect(() => {
         if (settings) {
@@ -252,9 +277,11 @@ export function SettingsModal() {
             setEnablePIIDetection(settings.enablePIIDetection ?? true)
             setEnableCloudTosdr(settings.enableCloudTosdr ?? false)
             setDisplayMode(settings.displayMode || "popup")
-            setAutoLockTimeout(settings.autoLockTimeout ?? -1)
+            setAutoLockTimeout(settings.autoLockTimeout === 0 ? -1 : (settings.autoLockTimeout ?? -1))
             setWhitelist(settings.whitelist || [])
             setBlacklist(settings.blacklist || [])
+            setDevModeLocal(settings.devMode === true)
+            setDevMode(settings.devMode === true)
         }
     }, [settings])
 
@@ -279,6 +306,7 @@ export function SettingsModal() {
             autoLockTimeout,
             whitelist,
             blacklist,
+            devMode,
         }
 
         await chrome.storage.local.set({ settings: updatedSettings })
@@ -309,6 +337,7 @@ export function SettingsModal() {
             enableCloudTosdr: false,
             displayMode: "popup" as const,
             autoLockTimeout: -1,
+            devMode: false,
         }
 
         // Apply defaults to local state
@@ -323,6 +352,8 @@ export function SettingsModal() {
         setEnableCloudTosdr(defaultPreferences.enableCloudTosdr)
         setDisplayMode(defaultPreferences.displayMode)
         setAutoLockTimeout(defaultPreferences.autoLockTimeout)
+        setDevModeLocal(defaultPreferences.devMode)
+        setDevMode(defaultPreferences.devMode)
 
         // Merge defaults with existing settings to preserve other data (whitelist, blacklist, etc.)
         const newSettings = {
@@ -395,7 +426,7 @@ export function SettingsModal() {
             a.click()
             URL.revokeObjectURL(url)
         } catch {
-            toast.add({ type: 'error', title: 'Could not export error log.', priority: 'high' })
+            toast.add({ type: 'error', title: t('Could not export error log.'), priority: 'high' })
         }
     }
 
@@ -404,10 +435,46 @@ export function SettingsModal() {
         setErrorLog([])
     }
 
+    const clearSessionLog = async () => {
+        await clearSessionEvents()
+    }
+
+    const copyDiagnostics = async () => {
+        const { copied } = await copyDiagnosticsToClipboard()
+        toast.add(copied
+            ? { type: 'success', title: t('Diagnostics copied to clipboard.') }
+            : { type: 'error', title: t('Could not copy diagnostics.'), priority: 'high' })
+    }
+
     return (
         <>
-            <Dialog open={isSettingsOpen} onOpenChange={setSettingsOpen}>
-            <DialogContent className="max-w-4xl p-0 overflow-hidden gap-0 bg-background border shadow-2xl h-[600px] flex flex-col">
+            <Dialog
+                open={isSettingsOpen}
+                onOpenChange={(open) => {
+                    // Never close silently while there are unsaved changes -
+                    // ask first (the confirm dialog below resolves the choice).
+                    if (!open && hasChanges) {
+                        setDiscardOpen(true)
+                        return
+                    }
+                    setSettingsOpen(open)
+                }}
+            >
+            <DialogContent
+                className="max-w-4xl p-0 overflow-hidden gap-0 bg-background border shadow-2xl h-[600px] flex flex-col"
+                onEscapeKeyDown={(e) => {
+                    if (hasChanges) {
+                        e.preventDefault()
+                        setDiscardOpen(true)
+                    }
+                }}
+                onInteractOutside={(e) => {
+                    if (hasChanges) {
+                        e.preventDefault()
+                        setDiscardOpen(true)
+                    }
+                }}
+            >
                 <DialogTitle className="sr-only">{t("Settings")}</DialogTitle>
                 <DialogDescription className="sr-only">{t("Configure TraceGuard preferences")}</DialogDescription>
 
@@ -605,7 +672,6 @@ export function SettingsModal() {
                                     <SelectItem value="1">{t("After 1 Minute")}</SelectItem>
                                     <SelectItem value="5">{t("After 5 Minutes")}</SelectItem>
                                     <SelectItem value="15">{t("After 15 Minutes")}</SelectItem>
-                                    <SelectItem value="0">{t("Never")}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </SettingItem>
@@ -975,13 +1041,60 @@ export function SettingsModal() {
                     <div className="rounded-lg border p-4 space-y-3">
                         <Label className="text-base font-medium flex items-center gap-2">
                             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                            Diagnostics
+                            {t("Diagnostics")}
                         </Label>
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-1">
+                                <Label htmlFor="dev-mode" className="text-sm font-medium">{t("Developer mode")}</Label>
+                                <p className="text-sm text-muted-foreground break-words">
+                                    {t("Developer mode captures detailed diagnostics for troubleshooting. It is off by default, stays on this device, and is cleared when the browser closes. Use it only when you understand what is being logged.")}
+                                </p>
+                            </div>
+                            <Switch
+                                id="dev-mode"
+                                checked={devMode}
+                                onCheckedChange={(checked) => {
+                                    // Apply immediately so the log starts filling
+                                    // right away; persisted with the other settings.
+                                    setDevModeLocal(checked)
+                                    setDevMode(checked)
+                                    handleChange()
+                                }}
+                            />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={copyDiagnostics}>
+                                <Copy className="mr-2 h-3 w-3" />
+                                {t("Copy diagnostics")}
+                            </Button>
+                            {sessionEvents.length > 0 && (
+                                <Button variant="ghost" size="sm" onClick={clearSessionLog}>
+                                    {t("Clear")}
+                                </Button>
+                            )}
+                        </div>
+                        {devMode && (
+                            sessionEvents.length === 0 ? (
+                                <p className="text-sm text-muted-foreground">{t("No events recorded.")}</p>
+                            ) : (
+                                <div className="rounded-md border max-h-40 overflow-y-auto divide-y">
+                                    {sessionEvents.slice(-80).reverse().map((entry) => (
+                                        <div key={entry.id} className="p-2 text-xs">
+                                            <span className="text-muted-foreground">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                            <p className="font-medium break-words">
+                                                [{entry.level}] {entry.area}/{entry.event}: {entry.message}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        )}
+                        <Separator />
                         <p className="text-sm text-muted-foreground break-words">
-                            Recent errors are stored locally on this device to help troubleshoot. They never leave your browser.
+                            {t("Recent errors are stored locally on this device to help troubleshoot. They never leave your browser.")}
                         </p>
                         {errorLog.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">No errors recorded.</p>
+                            <p className="text-sm text-muted-foreground">{t("No errors recorded.")}</p>
                         ) : (
                             <>
                                 <div className="rounded-md border max-h-40 overflow-y-auto divide-y">
@@ -996,10 +1109,10 @@ export function SettingsModal() {
                                 <div className="flex flex-wrap gap-2">
                                     <Button variant="outline" size="sm" onClick={exportErrorLog}>
                                         <Download className="mr-2 h-3 w-3" />
-                                        Export error log
+                                        {t("Export error log")}
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={clearErrorLogs}>
-                                        Clear
+                                        {t("Clear")}
                                     </Button>
                                 </div>
                             </>
@@ -1014,6 +1127,31 @@ export function SettingsModal() {
 
             <ExportDataDialog open={exportOpen} onOpenChange={setExportOpen} />
             <ImportDataDialog open={importOpen} onOpenChange={setImportOpen} />
+
+            {/* Discard-unsaved-changes confirmation */}
+            <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t("Discard unsaved changes?")}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t("Your unsaved settings changes will be lost if you close.")}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t("Keep editing")}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                setDiscardOpen(false)
+                                setHasChanges(false)
+                                setSettingsOpen(false)
+                            }}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {t("Discard changes")}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     )
 }

@@ -2,6 +2,7 @@ import React, { Component, ErrorInfo, ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import i18n from '@/lib/i18n'
+import { captureError } from '@/lib/diagnostics'
 
 interface Props {
   children: ReactNode;
@@ -25,6 +26,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo)
+    // Record it in the shared diagnostics stream so a React crash shows up in
+    // the copied diagnostics bundle, not only in a console nobody is watching.
+    captureError('ui', error, 'react_error_boundary', {
+      componentStack: errorInfo.componentStack ?? undefined,
+    })
     this.setState({ errorInfo })
   }
 

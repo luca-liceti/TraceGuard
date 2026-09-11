@@ -8,8 +8,10 @@ import { useSettings } from '@/lib/useStorage'
 import { redirectToDashboardIfFirstRun } from '@/lib/first-run'
 import '@/styles/globals.css'
 import '@/lib/i18n'
+import { installGlobalErrorHandlers, logEvent } from '@/lib/diagnostics'
 
-console.log('Mounting Popup...');
+// Capture uncaught errors thrown anywhere in the popup context.
+installGlobalErrorHandlers()
 
 function Root() {
     const settings = useSettings();
@@ -26,9 +28,10 @@ function Root() {
                     setShowPopup(true);
                 }
             })
-            .catch(() => {
+            .catch((error) => {
                 // If the check fails (e.g. storage unavailable), fall back to
                 // the normal popup UI rather than leaving a blank window.
+                logEvent('popup', 'warn', 'first_run_check_failed', 'Could not check first-run state', { error: String(error) });
                 if (!cancelled) setShowPopup(true);
             });
         return () => { cancelled = true; };
@@ -57,7 +60,6 @@ function Root() {
 
 try {
     const rootElement = document.getElementById('root');
-    console.log('Root element:', rootElement);
 
     if (!rootElement) {
         console.error('Failed to find root element');
@@ -69,7 +71,6 @@ try {
                 </ErrorBoundary>
             </React.StrictMode>,
         )
-        console.log('Popup mounted');
     }
 } catch (error) {
     console.error('Error mounting popup:', error);

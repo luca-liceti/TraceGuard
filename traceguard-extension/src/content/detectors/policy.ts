@@ -39,6 +39,8 @@
  * =============================================================================
  */
 
+import { logEvent } from '../../lib/diagnostics';
+
 /**
  * The result of privacy policy detection.
  */
@@ -115,10 +117,12 @@ export async function detectPrivacyPolicy(): Promise<number> {
         }
 
         // ToS;DR didn't find a rating
-        console.log('[Policy] ToS;DR: No rating found for this domain');
+        logEvent('detector', 'debug', 'policy_no_rating', 'ToS;DR returned no rating for this domain');
 
     } catch (error) {
-        console.warn('[Policy] ToS;DR API check failed:', error);
+        // Network and API failures are expected, so they land in the session log
+        // as warnings rather than in the durable error log.
+        logEvent('detector', 'warn', 'policy_tosdr_api_failed', 'ToS;DR API check failed', { error: String(error) });
     }
 
     // Fallback: Use local detection with neutral score
@@ -163,7 +167,7 @@ export async function detectPrivacyPolicyDetailed(): Promise<PolicyDetectionResu
             };
         }
     } catch (error) {
-        console.warn('[Policy] ToS;DR check failed:', error);
+        logEvent('detector', 'warn', 'policy_tosdr_check_failed', 'ToS;DR rating lookup failed', { error: String(error) });
     }
 
     return {

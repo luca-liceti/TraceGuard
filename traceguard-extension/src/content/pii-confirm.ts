@@ -22,12 +22,30 @@
  * =============================================================================
  */
 
+import { logEvent } from '../lib/diagnostics';
+
 export interface PIIConfirmData {
     domain: string;
     fieldType: string;
     reason: 'risky' | 'unnecessary' | string;
     message: string;
     siteWSS: number;
+    /**
+     * Pre-translated strings (localized in the background worker, which
+     * already has i18n loaded). Falls back to English when absent so the
+     * content script never needs the i18n bundle on every page.
+     */
+    texts?: {
+        title: string;
+        dismissLabel: string;
+        bodyPrefix: string;
+        bodySuffix: string;
+        confirm: string;
+        notSure: string;
+        note: string;
+        added: string;
+        addedNote: string;
+    };
 }
 
 const HOST_ID = 'traceguard-pii-confirm-host';
@@ -244,27 +262,39 @@ function buildCard(data: PIIConfirmData, theme: ThemeName): HTMLElement {
     const titleRow = document.createElement('div');
     titleRow.className = 'tg-title-row';
 
+    const text = data.texts ?? {
+        title: 'Is this website safe?',
+        dismissLabel: 'Dismiss',
+        bodyPrefix: 'TraceGuard detected personal info (',
+        bodySuffix: ') and this site doesn\u2019t meet our security checks. Make sure it\u2019s the real site before entering anything.',
+        confirm: 'It\u2019s safe - add to allow list',
+        notSure: 'Not sure',
+        note: 'If this is the real site, confirm to skip the penalty and add it to your allow list. Check the address bar carefully - lookalike domains are a common trick.',
+        added: '\u2713 Added',
+        addedNote: '{{domain}} was added to your allow list. TraceGuard won\u2019t penalize personal info here anymore.',
+    };
+
     const title = document.createElement('p');
     title.className = 'tg-title';
-    title.textContent = 'Is this website safe?';
+    title.textContent = text.title;
 
     titleRow.append(warningIcon, title);
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'tg-close';
     closeBtn.textContent = '✕';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.setAttribute('aria-label', text.dismissLabel);
 
     header.append(titleRow, closeBtn);
 
     const body = document.createElement('p');
     body.className = 'tg-body';
     body.append(
-        'TraceGuard detected personal info (',
-        document.createTextNode(data.fieldType),
-        ') on ',
+        text.bodyPrefix + data.fieldType,
+        ' ',
         (() => { const s = document.createElement('span'); s.className = 'tg-domain'; s.textContent = data.domain; return s; })(),
-        ' and this site doesn\u2019t meet our security checks. Make sure it\u2019s the real site before entering anything.'
+        ' ',
+        text.bodySuffix
     );
 
     const actions = document.createElement('div');
@@ -272,17 +302,17 @@ function buildCard(data: PIIConfirmData, theme: ThemeName): HTMLElement {
 
     const confirmBtn = document.createElement('button');
     confirmBtn.className = 'tg-btn tg-btn-primary';
-    confirmBtn.textContent = 'It\u2019s safe - add to allow list';
+    confirmBtn.textContent = text.confirm;
 
     const dismissBtn = document.createElement('button');
     dismissBtn.className = 'tg-btn tg-btn-secondary';
-    dismissBtn.textContent = 'Not sure';
+    dismissBtn.textContent = text.notSure;
 
     actions.append(confirmBtn, dismissBtn);
 
     const note = document.createElement('p');
     note.className = 'tg-note';
-    note.textContent = 'If this is the real site, confirm to skip the penalty and add it to your allow list. Check the address bar carefully - lookalike domains are a common trick.';
+    note.textContent = text.note;
 
     card.append(header, body, actions, note);
 
@@ -299,12 +329,19 @@ function buildCard(data: PIIConfirmData, theme: ThemeName): HTMLElement {
                 type: 'PII_CONFIRM_RESULT',
                 domain: data.domain,
                 safe,
-            }).catch(() => {
+            }).catch((error) => {
                 // The background may be unavailable (e.g. during unload); its
-                // confirmation timeout then falls back to penalizing.
+                // confirmation timeout then falls back to penalizing. Expected,
+                // so record it as a session warning rather than a bug.
+                logEvent('pii', 'warn', 'pii_confirm_result_undeliverable', 'Could not deliver the PII confirmation answer', {
+                    error: String(error),
+                });
             });
-        } catch {
+        } catch (error) {
             // chrome.runtime may be missing (e.g. in unit tests) - ignore.
+            logEvent('pii', 'debug', 'pii_confirm_runtime_missing', 'chrome.runtime unavailable while answering the card', {
+                error: String(error),
+            });
         }
     };
 
@@ -325,8 +362,8 @@ function buildCard(data: PIIConfirmData, theme: ThemeName): HTMLElement {
     confirmBtn.addEventListener('click', () => {
         confirmBtn.disabled = true;
         notifyBackground(true);
-        confirmBtn.textContent = '✓ Added';
-        note.textContent = `${data.domain} was added to your allow list. TraceGuard won't penalize personal info here anymore.`;
+        confirmBtn.textContent = text.added;
+        note.textContent = text.addedNote.replace('{{domain}}', data.domain);
         // Keep the confirmation visible briefly, then dismiss.
         setTimeout(remove, 2000);
     });

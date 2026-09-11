@@ -44,6 +44,8 @@
  * =============================================================================
  */
 
+import { captureError, logEvent } from '../../lib/diagnostics';
+
 /**
  * Represents information about a single cookie.
  *
@@ -328,7 +330,10 @@ export function detectCookiesDetailed(): {
             }
         };
     } catch (error) {
-        console.error('[Cookie Detector] Error:', error);
+        // A throw here used to be indistinguishable from a clean page: the
+        // caller received a perfect 100 with zero cookies. Record the failure so
+        // the two can be told apart in the diagnostics bundle.
+        captureError('detector', error, 'cookie_detector_failed');
         return { score: 100, total: 0, tracking: 0, thirdParty: 0 };
     }
 }
@@ -351,6 +356,7 @@ export function detectCookiesRaw(): { name: string }[] {
             return name ? { name } : null;
         }).filter(Boolean) as { name: string }[];
     } catch (e) {
+        logEvent('detector', 'warn', 'cookie_parse_failed', 'Could not parse document.cookie', { error: String(e) });
         return [];
     }
 }

@@ -36,9 +36,8 @@ import { piiDetector } from './pii-detector';  // Monitors sensitive input field
 import { showPIIConfirmCard } from './pii-confirm';  // "Is this website safe?" popup
 import { showToast } from './toast';                 // In-page toast notifications
 import { isLocalUrl } from '../lib/utils'; // Helps identify local network addresses
+import { captureError, installGlobalErrorHandlers, logEvent } from '../lib/diagnostics';
 
-// Log that we've started (helpful for debugging)
-console.log('TraceGuard Content Script Loaded');
 
 // =============================================================================
 // MAIN ANALYSIS - Runs immediately when the page loads
@@ -72,7 +71,14 @@ async function runAnalysis(isInitialLoad: boolean) {
     try {
         // Respect the user's master on/off toggle, pause journaling when disabled.
         const { settings } = await chrome.storage.local.get<{ settings?: any }>('settings');
-        if (settings?.enabled === false) return;
+        if (settings?.enabled === false) {
+            logEvent('content', 'debug', 'analysis_skipped', 'Analysis skipped: extension disabled', { host: window.location.hostname });
+            return;
+        }
+
+        logEvent('content', 'debug', 'analysis_started', isInitialLoad ? 'Initial page analysis' : 'Re-analysis', {
+            host: window.location.hostname,
+        });
 
         // STEP 1: Analyze the current page for privacy issues
         const result = await analyzePage();
@@ -93,15 +99,25 @@ async function runAnalysis(isInitialLoad: boolean) {
             scores: result.scores,
             detectionDetails: result.detectionDetails,
             rawForEnrichment: result.rawForEnrichment
-        }).catch(() => {
-            // If sending fails, ignore it
+        }).catch((error) => {
+            // The worker can be restarting, which makes this transient and
+            // expected, so it goes to the session log as a warning rather than
+            // into the durable error log.
+            logEvent('content', 'warn', 'analysis_send_failed', 'Could not deliver page analysis to the background worker', {
+                error: String(error),
+                host: window.location.hostname,
+            });
         });
     } catch (error) {
-        console.error('TraceGuard analysis failed:', error);
+        captureError('content', error, 'page_analysis_failed', { host: window.location.hostname });
     }
 }
 
 const debouncedAnalysis = debounce(runAnalysis, 1000);
+
+// Capture uncaught errors thrown anywhere in this content script into the
+// shared diagnostics stream, so an unwritten catch cannot hide a failure.
+installGlobalErrorHandlers();
 
 // Run initial analysis (a genuine document load)
 runAnalysis(true);

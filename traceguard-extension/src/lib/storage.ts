@@ -44,6 +44,7 @@
 
 import { StorageSchema, UserSettings, AppState } from './types';
 import { encryptData, decryptData, generateAesKey, exportKey, importKey } from './crypto';
+import { captureError, logEvent } from './diagnostics';
 
 // =============================================================================
 // IN-MEMORY BUFFER (vault locked)
@@ -109,7 +110,8 @@ const DEFAULT_SETTINGS: UserSettings = {
     blacklist: [],                // Sites you've marked as always dangerous
     logRetentionDays: 30,         // Days to keep activity logs before auto-deletion
     databaseRefreshDays: 7,
-    enableCloudTosdr: false       // Live rating updates defaults to false (privacy-first)
+    enableCloudTosdr: false,      // Live rating updates defaults to false (privacy-first)
+    devMode: false               // Verbose diagnostics are off until explicitly enabled
 };
 
 /**
@@ -197,12 +199,20 @@ export const storage = {
             await chrome.storage.local.set(items);
         } catch (error: any) {
             if (error?.message?.includes('QUOTA_BYTES') || error?.name === 'QuotaExceededError') {
+                // Session log only: writing this to the durable error log during a
+                // quota failure would fail the same way it just did.
+                logEvent('storage', 'error', 'quota_exceeded', 'chrome.storage.local quota exceeded', {
+                    error: String(error),
+                });
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('QUOTA_EXCEEDED'));
                 } else {
-                    chrome.runtime.sendMessage({ type: 'QUOTA_EXCEEDED' }).catch(() => {});
+                    chrome.runtime.sendMessage({ type: 'QUOTA_EXCEEDED' }).catch((notifyError) => {
+                        logEvent('storage', 'error', 'quota_notify_failed', 'Could not notify the background about the quota failure', {
+                            error: String(notifyError),
+                        });
+                    });
                 }
-                console.error("Storage quota exceeded!", error);
             }
             throw error;
         }
@@ -241,7 +251,7 @@ export const storage = {
                 await storage.set({ state: { ...current, ...patch } });
             });
             // Keep the chain alive even if this write fails, so later writes still run.
-            chain = run.catch((error) => console.error('[storage.updateState] Write failed:', error));
+            chain = run.catch((error) => captureError('storage', error, 'state_write_failed'));
             return run;
         };
     })(),

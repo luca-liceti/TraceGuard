@@ -75,14 +75,6 @@ export interface StatusConfig {
     description: string;
     color: string;
     bgColor: string;
-    /**
-     * Full CSS color for the score gauge (the dashboard ring and the panel's
-     * progress bar). Per-theme `--score-*` tokens, tuned to 3:1, instead of the
-     * shared status colors, which are too light for a thin stroke or text on
-     * the light card. The value is always the number, never the color, so the
-     * gauge is the only place a band color appears as a foreground.
-     */
-    gauge: string;
 }
 
 
@@ -151,7 +143,6 @@ export const STATUS_CONFIGS: Record<ScoreStatus, StatusConfig> = {
         description: 'Your browsing habits are excellent!',
         color: 'text-success',
         bgColor: 'bg-success/10',
-        gauge: 'oklch(var(--score-good))',
     },
     good: {
         status: 'good',
@@ -159,7 +150,6 @@ export const STATUS_CONFIGS: Record<ScoreStatus, StatusConfig> = {
         description: 'Good privacy practices, keep it up!',
         color: 'text-success',
         bgColor: 'bg-success/10',
-        gauge: 'oklch(var(--score-good))',
     },
     fair: {
         status: 'fair',
@@ -167,7 +157,6 @@ export const STATUS_CONFIGS: Record<ScoreStatus, StatusConfig> = {
         description: 'Room for improvement in privacy.',
         color: 'text-warning',
         bgColor: 'bg-warning/10',
-        gauge: 'oklch(var(--score-fair))',
     },
     poor: {
         status: 'poor',
@@ -175,7 +164,6 @@ export const STATUS_CONFIGS: Record<ScoreStatus, StatusConfig> = {
         description: 'Consider reviewing your browsing habits.',
         color: 'text-alert',
         bgColor: 'bg-alert/10',
-        gauge: 'oklch(var(--score-poor))',
     },
     critical: {
         status: 'critical',
@@ -183,7 +171,6 @@ export const STATUS_CONFIGS: Record<ScoreStatus, StatusConfig> = {
         description: 'Immediate attention recommended.',
         color: 'text-destructive',
         bgColor: 'bg-destructive/10',
-        gauge: 'oklch(var(--score-critical))',
     },
 };
 

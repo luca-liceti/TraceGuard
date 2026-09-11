@@ -43,7 +43,7 @@
  */
 
 import { StorageSchema, UserSettings, AppState } from './types';
-import { encryptData, decryptData, generateAesKey, exportKey, importKey } from './crypto';
+import { encryptData, decryptData, decryptDataStrict, generateAesKey, exportKey, importKey, DECRYPT_FAILED } from './crypto';
 import { captureError, logEvent } from './diagnostics';
 
 // =============================================================================
@@ -141,7 +141,14 @@ async function persistDetectorLogs(
     // Decrypt existing logs if they are encrypted
     let logs: import('./types').DetectorLogEntry[];
     if (key && typeof raw === 'string') {
-        logs = (await decryptData(key, raw)) || [];
+        const decrypted = await decryptDataStrict<import('./types').DetectorLogEntry[]>(key, raw);
+        if (decrypted === DECRYPT_FAILED) {
+            // The stored journal exists but cannot be read. Writing the new logs
+            // would replace it with a one-entry array, so drop only this input.
+            captureError('storage', new Error('detectorLogs could not be decrypted'), 'detector_logs_unreadable');
+            return;
+        }
+        logs = decrypted || [];
     } else if (typeof raw === 'string') {
         // Vault is locked and data is encrypted, buffer the new logs in the
         // encrypted session buffer so they are not lost.
@@ -187,6 +194,19 @@ async function persistDetectorLogs(
     } else {
         await storage.set({ detectorLogs: filteredLogs });
     }
+}
+
+/**
+ * Notification writes read the encrypted list before rewriting it. While the
+ * vault is locked that list cannot be decrypted, and writing an empty array over
+ * it would erase every stored notification, so the write is refused.
+ */
+async function notificationsWritable(key: CryptoKey | null): Promise<boolean> {
+    if (key) return true;
+    const current = await chrome.storage.local.get('notifications');
+    if (typeof current.notifications !== 'string') return true;
+    logEvent('storage', 'warn', 'notifications_write_blocked_locked', 'Skipped a notification update while the vault is locked');
+    return false;
 }
 
 export const storage = {
@@ -319,7 +339,14 @@ export const storage = {
 
         let logs: import('./types').DetectorLogEntry[];
         if (key && typeof raw === 'string') {
-            logs = (await decryptData(key, raw)) || [];
+            const decrypted = await decryptDataStrict<import('./types').DetectorLogEntry[]>(key, raw);
+            if (decrypted === DECRYPT_FAILED) {
+                // Never treat an unreadable journal as an empty one: writing the
+                // filtered result back would delete every stored log.
+                captureError('storage', new Error('detectorLogs could not be decrypted'), 'log_cleanup_unreadable');
+                return;
+            }
+            logs = decrypted || [];
         } else if (typeof raw === 'string') {
             return; // Can't clean up encrypted data without the key
         } else {
@@ -408,7 +435,12 @@ export const storage = {
         // Decrypt existing exposure map if it is encrypted
         let exposure: import('./types').CrossSiteExposure;
         if (key && typeof raw === 'string') {
-            exposure = (await decryptData(key, raw)) || {};
+            const decrypted = await decryptDataStrict<import('./types').CrossSiteExposure>(key, raw);
+            if (decrypted === DECRYPT_FAILED) {
+                captureError('storage', new Error('crossSiteExposure could not be decrypted'), 'exposure_unreadable');
+                return;
+            }
+            exposure = decrypted || {};
         } else if (typeof raw === 'string') {
             // Vault locked and data is encrypted, buffer instead of dropping.
             const buffered = (await readBuffer<import('./types').CrossSiteExposure>('bufferedExposure')) || {};
@@ -504,7 +536,13 @@ export const storage = {
         // Decrypt existing notifications if they are encrypted
         let notifications: import('./types').NotificationEvent[];
         if (key && typeof raw === 'string') {
-            notifications = (await decryptData(key, raw)) || [];
+            const decrypted = await decryptDataStrict<import('./types').NotificationEvent[]>(key, raw);
+            if (decrypted === DECRYPT_FAILED) {
+                // Writing an empty list would drop every stored notification.
+                captureError('storage', new Error('notifications could not be decrypted'), 'notifications_unreadable');
+                return '';
+            }
+            notifications = decrypted || [];
         } else if (typeof raw === 'string') {
             // Vault locked and data is encrypted, buffer instead of dropping.
             const buffered = (await readBuffer<import('./types').NotificationEvent[]>('bufferedNotifications')) || [];
@@ -577,6 +615,7 @@ export const storage = {
         // handle to it (the UI) never wipe encrypted notifications by writing
         // back an empty plaintext array.
         const k = key === undefined ? await storage.getVaultKey() : key;
+        if (!(await notificationsWritable(k))) return;
         const notifications = await storage.getNotifications(undefined, k);
         const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
         if (k) {
@@ -592,6 +631,7 @@ export const storage = {
      */
     markAllAsRead: async (key?: CryptoKey | null): Promise<void> => {
         const k = key === undefined ? await storage.getVaultKey() : key;
+        if (!(await notificationsWritable(k))) return;
         const notifications = await storage.getNotifications(undefined, k);
         const updated = notifications.map(n => ({ ...n, read: true }));
         if (k) {
@@ -615,6 +655,7 @@ export const storage = {
      */
     removeNotification: async (id: string, key?: CryptoKey | null): Promise<void> => {
         const k = key === undefined ? await storage.getVaultKey() : key;
+        if (!(await notificationsWritable(k))) return;
         const notifications = await storage.getNotifications(undefined, k);
         const filtered = notifications.filter(n => n.id !== id);
         if (k) {

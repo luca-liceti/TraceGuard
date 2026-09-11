@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { deriveKeyFromPassword, generateSalt, exportKey, verifySaltUniqueness } from "@/lib/crypto"
 import { storage } from "@/lib/storage"
+import { captureError } from "@/lib/diagnostics"
 
 import PrivacyPolicyPage from "@/components/traceguard/pages/privacy-policy"
 import { useTranslation } from "react-i18next";
@@ -67,9 +68,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setAuthState("locked")
       }
-    } catch (err) {
-      console.error("Auth check failed:", err)
-      setAuthState("setup") // fallback for dev
+    } catch (error) {
+      // Fail closed. Treating an unreadable vault as "no vault yet" used to show
+      // the account-creation screen over an existing vault, where creating a new
+      // one replaces the salt and validator and strands every encrypted entry.
+      captureError('ui', error, 'auth_check_failed')
+      setError(t("Could not read your vault settings. Your data is untouched. Reload the extension to try again."))
+      setAuthState("locked")
     }
   }
 

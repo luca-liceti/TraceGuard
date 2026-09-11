@@ -2,6 +2,15 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.3
+
+**What was fixed**
+
+- The vault key is no longer exposed to web pages. The extension used to open `chrome.storage.session` to untrusted contexts, and that area holds the key that decrypts your stored data, so a script running on any site could have read it. Developer mode events from the content script now travel through the background worker, which is the only context allowed to write there.
+- Unreadable encrypted data is no longer replaced with an empty value. A failed decrypt used to be treated the same as "nothing stored", so one read error could overwrite your site cache, score history, personal-information journal, or notifications with only the newest entry. Those writes are now skipped and the failure is recorded.
+- If the extension cannot read your vault settings, it now stays on the locked screen with an explanation instead of showing the account-creation screen. The old behavior let you create a new vault over an existing one and strand every encrypted entry.
+- Settings and personal-information messages from the content script are validated before the worker acts on them. A malformed message used to throw inside the listener or store an unreadable value.
+
 ## v1.7.2
 
 **What was fixed**

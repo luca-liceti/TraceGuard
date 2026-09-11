@@ -7,6 +7,8 @@
  * Used to lock the extension and protect sensitive telemetry.
  */
 
+import { logEvent } from './diagnostics';
+
 const ALGO_NAME = 'AES-GCM';
 const PBKDF2_ITERATIONS = 600000;
 const PBKDF2_HASH = 'SHA-256';
@@ -98,10 +100,40 @@ export async function decryptData<T = any>(key: CryptoKey, encryptedBase64: stri
         
         const decoder = new TextDecoder();
         return JSON.parse(decoder.decode(decryptedBuffer)) as T;
-    } catch (err) {
-        console.error("Decryption failed", err);
+    } catch (error) {
+        // A failed decrypt is expected whenever the key is wrong or the blob is
+        // corrupt, so it is recorded as a session warning rather than a durable
+        // error. Callers that must not mistake "unreadable" for "empty" use
+        // `decryptDataStrict` instead.
+        logEvent('storage', 'warn', 'decryption_failed', 'Could not decrypt stored data', {
+            error: String(error),
+        });
         return null;
     }
+}
+
+/**
+ * Sentinel returned when stored data exists but cannot be decrypted.
+ *
+ * `decryptData` returns `null` both when a key is absent and when decryption
+ * fails. Read-modify-write paths used to treat both as empty, so a transient
+ * failure rewrote an encrypted collection (site cache, score history, PII
+ * journal, notifications) with only the newest entry, destroying the rest.
+ */
+export const DECRYPT_FAILED = Symbol('traceguard-decrypt-failed');
+
+/**
+ * Like `decryptData`, but keeps "unreadable" apart from "absent".
+ *
+ * Mutation paths must use this: on `DECRYPT_FAILED` the caller must skip its
+ * write and report the failure rather than replace the stored blob.
+ */
+export async function decryptDataStrict<T = any>(
+    key: CryptoKey,
+    encryptedBase64: string
+): Promise<T | typeof DECRYPT_FAILED> {
+    const parsed = await decryptData<T>(key, encryptedBase64);
+    return parsed === null ? DECRYPT_FAILED : parsed;
 }
 
 /**

@@ -31,7 +31,7 @@
 
 import { storage, readBuffer, writeBuffer } from '../lib/storage';
 import { recordError } from '../lib/error-log';
-import { captureError, enableSessionAccessForUntrustedContexts, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
+import { appendRelayedEvents, captureError, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
 import { z } from 'zod';
 import { loadBlacklist, checkReputation, refreshBlacklistFromRemote } from './services/reputation';
 import { calculateWSS, calculateTrackingScore, explainWSS } from '../lib/scoring';
@@ -39,7 +39,7 @@ import { SiteRiskData, ScoreHistoryEntry, EnrichedDetectionDetails, Fingerprinti
 import { slimSiteData, resolveSyncCurrentSite } from '../lib/site-sync';
 import { checkTosDR } from './tosdr-api';
 import { calculateVisitImpact, calculatePIIPenalty, evaluatePIIEntry, PIIEntryDecision } from '../lib/pii';
-import { encryptData, decryptData, importKey } from '../lib/crypto';
+import { encryptData, decryptData, decryptDataStrict, importKey, DECRYPT_FAILED } from '../lib/crypto';
 import { preWarmDatabases, lookupTrackerDomain } from './services/database-loader';
 import { initNetworkMonitor, getAndClearNetworkData, setNetworkMonitorEnabled } from './services/network-monitor';
 import { enrichCookies } from './services/cookie-enricher';
@@ -207,6 +207,24 @@ async function getCryptoKey(): Promise<CryptoKey | null> {
     return null;
 }
 
+/** Returned by `readEncryptedArray` when stored data exists but is unreadable. */
+const READ_FAILED = Symbol('read-failed');
+
+/**
+ * Reads an encrypted array field for a read-modify-write cycle.
+ *
+ * `decryptData` reports `null` both when a key is absent and when decryption
+ * fails, so a transient failure used to rewrite the collection as empty. This
+ * keeps the two apart: `undefined` means absent, `READ_FAILED` means present but
+ * unreadable, and the caller must not write in that case.
+ */
+async function readEncryptedArray<T>(key: CryptoKey, raw: unknown): Promise<T[] | typeof READ_FAILED | undefined> {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw !== 'string') return Array.isArray(raw) ? (raw as T[]) : [];
+    const decrypted = await decryptDataStrict<T[]>(key, raw);
+    return decrypted === DECRYPT_FAILED ? READ_FAILED : (decrypted ?? []);
+}
+
 async function flushBufferedTelemetry() {
     const key = await getCryptoKey();
     if (!key) return; // Should not happen since UI just set it
@@ -222,49 +240,83 @@ async function flushBufferedTelemetry() {
     ]);
     const local = await chrome.storage.local.get<Record<string, any>>(['piiDetections', 'scoreHistory', 'siteCache', 'detectorLogs', 'notifications', 'crossSiteExposure']);
 
-    const mergeArray = async (storageKey: string, buffered: any[] | null, cap: number) => {
+    // Buffers whose target could not be decrypted stay in place: clearing them
+    // would drop the buffered entries on top of an unreadable collection.
+    const unflushed: string[] = [];
+
+    const mergeArray = async (storageKey: string, bufferName: string, buffered: any[] | null, cap: number) => {
         if (!buffered || buffered.length === 0) return;
-        let existing: any[] = typeof local[storageKey] === 'string'
-            ? (await decryptData(key, local[storageKey])) || []
-            : (local[storageKey] || []);
+        let existing: any[];
+        if (typeof local[storageKey] === 'string') {
+            const decrypted = await decryptDataStrict<any[]>(key, local[storageKey]);
+            if (decrypted === DECRYPT_FAILED) {
+                unflushed.push(bufferName);
+                captureError('storage', new Error(`${storageKey} could not be decrypted`), 'telemetry_flush_decrypt_failed');
+                return;
+            }
+            existing = decrypted || [];
+        } else {
+            existing = local[storageKey] || [];
+        }
         existing = [...existing, ...buffered];
         if (existing.length > cap) existing = existing.slice(-cap);
         await chrome.storage.local.set({ [storageKey]: await encryptData(key, existing) });
     };
 
-    await mergeArray('piiDetections', bufferedPii, 100);
-    await mergeArray('scoreHistory', bufferedScoreHistory, SCORE_HISTORY_LIMIT);
-    await mergeArray('detectorLogs', bufferedDetectorLogs, 5000);
-    await mergeArray('notifications', bufferedNotifications, 100);
+    await mergeArray('piiDetections', 'bufferedPii', bufferedPii, 100);
+    await mergeArray('scoreHistory', 'bufferedScoreHistory', bufferedScoreHistory, SCORE_HISTORY_LIMIT);
+    await mergeArray('detectorLogs', 'bufferedDetectorLogs', bufferedDetectorLogs, 5000);
+    await mergeArray('notifications', 'bufferedNotifications', bufferedNotifications, 100);
 
     // Flush Site Cache
     if (bufferedSiteCache && Object.keys(bufferedSiteCache).length > 0) {
-        let cache = typeof local.siteCache === 'string' ? await decryptData(key, local.siteCache) || {} : local.siteCache || {};
-        cache = { ...cache, ...bufferedSiteCache };
-        await chrome.storage.local.set({ siteCache: await encryptData(key, cache) });
+        const current = typeof local.siteCache === 'string'
+            ? await decryptDataStrict<Record<string, SiteRiskData>>(key, local.siteCache)
+            : (local.siteCache || {});
+        if (current === DECRYPT_FAILED) {
+            unflushed.push('bufferedSiteCache');
+            captureError('storage', new Error('siteCache could not be decrypted'), 'telemetry_flush_decrypt_failed');
+        } else {
+            const cache = { ...(current || {}), ...bufferedSiteCache };
+            await chrome.storage.local.set({ siteCache: await encryptData(key, cache) });
+        }
     }
 
     // Flush Cross-Site Exposure
     if (bufferedExposure && Object.keys(bufferedExposure).length > 0) {
-        const exposure = typeof local.crossSiteExposure === 'string' ? await decryptData(key, local.crossSiteExposure) || {} : local.crossSiteExposure || {};
-        for (const [fieldType, domains] of Object.entries(bufferedExposure)) {
-            exposure[fieldType] = Array.from(new Set([...(exposure[fieldType] || []), ...(domains || [])]));
+        const current = typeof local.crossSiteExposure === 'string'
+            ? await decryptDataStrict<Record<string, string[]>>(key, local.crossSiteExposure)
+            : (local.crossSiteExposure || {});
+        if (current === DECRYPT_FAILED) {
+            unflushed.push('bufferedExposure');
+            captureError('storage', new Error('crossSiteExposure could not be decrypted'), 'telemetry_flush_decrypt_failed');
+        } else {
+            const exposure = current || {};
+            for (const [fieldType, domains] of Object.entries(bufferedExposure)) {
+                exposure[fieldType] = Array.from(new Set([...(exposure[fieldType] || []), ...(domains || [])]));
+            }
+            await chrome.storage.local.set({ crossSiteExposure: await encryptData(key, exposure) });
         }
-        await chrome.storage.local.set({ crossSiteExposure: await encryptData(key, exposure) });
     }
 
-    // Clear buffers (they now live in session storage, not local)
-    await chrome.storage.session.remove(['bufferedPii', 'bufferedScoreHistory', 'bufferedSiteCache', 'bufferedDetectorLogs', 'bufferedNotifications', 'bufferedExposure']);
-    console.log('[Vault] Buffered telemetry flushed to encrypted storage.');
+    // Clear only the buffers that were merged. An unreadable collection keeps its
+    // buffer so nothing is lost while the failure is investigated.
+    const bufferNames = ['bufferedPii', 'bufferedScoreHistory', 'bufferedSiteCache', 'bufferedDetectorLogs', 'bufferedNotifications', 'bufferedExposure'];
+    const cleared = bufferNames.filter(name => !unflushed.includes(name));
+    if (cleared.length > 0) await chrome.storage.session.remove(cleared);
+    logEvent('storage', 'debug', 'telemetry_flushed', 'Buffered telemetry merged into encrypted storage', {
+        flushed: cleared.length,
+        deferred: unflushed.length,
+    });
 }
 
 // Capture uncaught errors and unhandled rejections from the moment the worker
 // starts. Without this, a throw in any async path here disappears silently.
 installGlobalErrorHandlers();
 setDiagnosticContext('background');
-// The worker is the only context that can widen session storage access, which
-// the content script needs before any of its events can reach a copied bundle.
-enableSessionAccessForUntrustedContexts();
+// The session area is never opened to page contexts, because it holds the vault
+// key. A content script relays its developer-mode events instead, and the
+// DIAGNOSTIC_EVENTS handler below appends them to the shared session log.
 
 // Initialize the network monitor right away to start observing web requests
 initNetworkMonitor();
@@ -420,10 +472,20 @@ async function syncStateWithCache() {
         let historyData = result.scoreHistory;
         
         if (typeof siteCacheData === 'string') {
-            siteCacheData = await decryptData(key, siteCacheData) || {};
+            const decrypted = await decryptDataStrict<Record<string, SiteRiskData>>(key, siteCacheData);
+            if (decrypted === DECRYPT_FAILED) {
+                captureError('storage', new Error('siteCache could not be decrypted'), 'state_sync_decrypt_failed');
+                return;
+            }
+            siteCacheData = decrypted || {};
         }
         if (typeof historyData === 'string') {
-            historyData = await decryptData(key, historyData) || [];
+            const decrypted = await decryptDataStrict<ScoreHistoryEntry[]>(key, historyData);
+            if (decrypted === DECRYPT_FAILED) {
+                captureError('storage', new Error('scoreHistory could not be decrypted'), 'state_sync_decrypt_failed');
+                return;
+            }
+            historyData = decrypted || [];
         }
 
         // Failsafe healing for corrupted siteCache
@@ -696,11 +758,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     // -------------------------------------------------------------------------
+    // DIAGNOSTIC EVENTS: verbose events relayed by a content script
+    // A page context cannot reach the session area, which also holds the vault
+    // key, so it hands its developer-mode events to the worker instead.
+    // -------------------------------------------------------------------------
+    if (message.type === 'DIAGNOSTIC_EVENTS') {
+        appendRelayedEvents(message.events)
+            .then(() => sendResponse({ success: true }))
+            .catch((error) => {
+                recordError('Diagnostics relay failed', String(error));
+                sendResponse({ success: false, error: String(error) });
+            });
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
     // SETTINGS CHANGED: User updated their settings in the dashboard
     // We need to apply the new settings right away
     // -------------------------------------------------------------------------
     if (message.type === 'SETTINGS_CHANGED') {
-        const newSettings = message.settings;
+        const parsedSettings = SettingsChangedSchema.safeParse(message);
+        if (!parsedSettings.success) {
+            // A payload without `settings` used to throw inside this listener,
+            // which left the sender waiting for a response that never arrived.
+            logEvent('ui', 'warn', 'settings_changed_invalid', 'Rejected a malformed settings update', {
+                issues: parsedSettings.error.issues.map(issue => issue.path.join('.')).join(', '),
+            });
+            sendResponse({ success: false, error: 'Invalid settings payload' });
+            return true;
+        }
+        const newSettings = parsedSettings.data.settings;
 
         armAutoLock(true);
 
@@ -750,6 +837,33 @@ const PageAnalysisSchema = z.object({
         fingerprinting: z.array(z.any()).max(200).optional(),
     }).optional()
 }).passthrough();
+
+// The PII path stores what it receives and repeats some of it in notifications,
+// so the fields the content script contributes are validated the same way as a
+// page analysis payload.
+const PiiDetectionSchema = z.object({
+    data: z.object({
+        timestamp: z.number().finite().optional(),
+        site: z.string().min(1).max(255),
+        fieldType: z.string().min(1).max(64),
+        sensitivity: z.enum(['HIGH', 'MEDIUM', 'LOW']),
+        pageContext: z.object({
+            isLoginPage: z.boolean(),
+            isCheckoutPage: z.boolean(),
+        }).default({ isLoginPage: false, isCheckoutPage: false }),
+    }),
+});
+
+// Only the fields the worker acts on are validated; the dashboard persists the
+// full settings object itself, so extra keys are allowed through.
+const SettingsChangedSchema = z.object({
+    settings: z.object({
+        enabled: z.boolean().optional(),
+        displayMode: z.enum(['popup', 'sidebar']).optional(),
+        databaseRefreshDays: z.number().finite().optional(),
+        devMode: z.boolean().optional(),
+    }).passthrough(),
+});
 
 async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSender) {
     const parsed = PageAnalysisSchema.safeParse(message);
@@ -910,12 +1024,23 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
     // Step 4: Save this site's data to the cache
     const key = await getCryptoKey();
     let siteCache: Record<string, SiteRiskData> = {};
-    
+    let siteCacheWritable = true;
+
     if (key) {
         const result = await chrome.storage.local.get<Record<string, any>>('siteCache');
-        siteCache = typeof result.siteCache === 'string' 
-            ? await decryptData(key, result.siteCache) || {} 
-            : result.siteCache || {};
+        if (typeof result.siteCache === 'string') {
+            const decrypted = await decryptDataStrict<Record<string, SiteRiskData>>(key, result.siteCache);
+            if (decrypted === DECRYPT_FAILED) {
+                // Writing here would replace every stored analysis with this one
+                // site, so skip the cache write and leave the blob untouched.
+                siteCacheWritable = false;
+                captureError('storage', new Error('siteCache could not be decrypted'), 'site_cache_unreadable');
+            } else {
+                siteCache = decrypted || {};
+            }
+        } else {
+            siteCache = result.siteCache || {};
+        }
     } else {
         siteCache = (await readBuffer<Record<string, SiteRiskData>>('bufferedSiteCache')) || {};
     }
@@ -951,10 +1076,12 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
         for (const [expiredDomain] of cacheEntries.slice(0, cacheEntries.length - 5000)) delete siteCache[expiredDomain];
     }
     
-    if (key) {
-        await chrome.storage.local.set({ siteCache: await encryptData(key, siteCache) });
-    } else {
-        await writeBuffer('bufferedSiteCache', siteCache);
+    if (siteCacheWritable) {
+        if (key) {
+            await chrome.storage.local.set({ siteCache: await encryptData(key, siteCache) });
+        } else {
+            await writeBuffer('bufferedSiteCache', siteCache);
+        }
     }
 
     // Step 5: Update the user's privacy state
@@ -1008,30 +1135,34 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
     // Append a score-history point only on a genuine navigation; SPA
     // re-analyses of the same page must not duplicate the chart.
     if (isNewNavigation && upsImpact) {
-        let history: ScoreHistoryEntry[] = [];
+        let history: ScoreHistoryEntry[] | typeof READ_FAILED = [];
         if (key) {
             const histResult = await chrome.storage.local.get<Record<string, any>>('scoreHistory');
-            history = typeof histResult.scoreHistory === 'string'
-                ? await decryptData(key, histResult.scoreHistory) || []
-                : histResult.scoreHistory || [];
+            history = (await readEncryptedArray<ScoreHistoryEntry>(key, histResult.scoreHistory)) ?? [];
         } else {
             history = (await readBuffer<ScoreHistoryEntry[]>('bufferedScoreHistory')) || [];
         }
-        
-        history.push({
-            timestamp: Date.now(),
-            ups: upsImpact.newUPS,
-            avgSiteRisk: wss,
-            reason: upsImpact.message || `Visited ${domain}`
-        });
 
-        // Keep a rolling window large enough for the 30-day chart view
-        if (history.length > SCORE_HISTORY_LIMIT) history.splice(0, history.length - SCORE_HISTORY_LIMIT);
-        
-        if (key) {
-            await chrome.storage.local.set({ scoreHistory: await encryptData(key, history) });
+        if (history === READ_FAILED) {
+            // The existing history is present but unreadable. Appending to an
+            // empty array and writing it back would erase it.
+            captureError('storage', new Error('scoreHistory could not be decrypted'), 'score_history_unreadable');
         } else {
-            await writeBuffer('bufferedScoreHistory', history);
+            history.push({
+                timestamp: Date.now(),
+                ups: upsImpact.newUPS,
+                avgSiteRisk: wss,
+                reason: upsImpact.message || `Visited ${domain}`
+            });
+
+            // Keep a rolling window large enough for the 30-day chart view
+            if (history.length > SCORE_HISTORY_LIMIT) history.splice(0, history.length - SCORE_HISTORY_LIMIT);
+
+            if (key) {
+                await chrome.storage.local.set({ scoreHistory: await encryptData(key, history) });
+            } else {
+                await writeBuffer('bufferedScoreHistory', history);
+            }
         }
     }
 
@@ -1343,7 +1474,14 @@ async function askForSiteConfirmation(
 }
 
 async function handlePIIDetection(message: any, tabId?: number) {
-    const event = message.data;
+    const parsed = PiiDetectionSchema.safeParse(message);
+    if (!parsed.success) {
+        logEvent('pii', 'warn', 'pii_payload_invalid', 'Rejected a malformed PII detection payload', {
+            issues: parsed.error.issues.map(issue => issue.path.join('.')).join(', '),
+        });
+        return;
+    }
+    const event = parsed.data.data;
     logEvent('pii', 'debug', 'pii_detected', 'PII entry detected', {
         host: event.site,
         fieldType: event.fieldType,
@@ -1451,12 +1589,16 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: 
 
     if (key) {
         const storageData = await chrome.storage.local.get<Record<string, any>>(['piiDetections', 'scoreHistory']);
-        piiDetections = typeof storageData.piiDetections === 'string'
-            ? await decryptData(key, storageData.piiDetections) || []
-            : storageData.piiDetections || [];
-        scoreHistory = typeof storageData.scoreHistory === 'string'
-            ? await decryptData(key, storageData.scoreHistory) || []
-            : storageData.scoreHistory || [];
+        const storedPii = await readEncryptedArray<any>(key, storageData.piiDetections);
+        const storedHistory = await readEncryptedArray<any>(key, storageData.scoreHistory);
+        if (storedPii === READ_FAILED || storedHistory === READ_FAILED) {
+            // Rewriting an unreadable journal as empty would discard every
+            // recorded exposure, so leave storage untouched and report it.
+            captureError('storage', new Error('PII journal could not be decrypted'), 'pii_journal_unreadable');
+            return;
+        }
+        piiDetections = storedPii ?? [];
+        scoreHistory = storedHistory ?? [];
     } else {
         const [piiBuffer, historyBuffer] = await Promise.all([
             readBuffer<any[]>('bufferedPii'),
@@ -1533,7 +1675,7 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: 
     // Record this PII detection event
     // Note: We only store metadata (field TYPE, site, timestamp) - NOT the actual value you typed!
     piiDetections.push({
-        timestamp: event.timestamp,        // When it happened
+        timestamp: event.timestamp ?? Date.now(),  // When it happened
         site: event.site,                  // Which website
         fieldType: event.fieldType,        // What type of field (password, email, etc.)
         sensitivity: event.sensitivity,   // How sensitive (HIGH, MEDIUM, LOW)

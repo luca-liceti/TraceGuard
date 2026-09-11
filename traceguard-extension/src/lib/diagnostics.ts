@@ -172,21 +172,16 @@ export function getDiagnosticContext(): DiagnosticArea {
 }
 
 /**
- * Allows content scripts to read and write the shared session log.
+ * True in a context Chrome treats as untrusted for `chrome.storage.session`,
+ * which is the content script running on a web page.
  *
- * `chrome.storage.session` is restricted to trusted contexts by default, so
- * without this call the mirror inside a page fails (silently, by design) and
- * everything the content script records is missing from an exported bundle.
- * Only the background worker can widen access, and only at runtime.
+ * That area holds the vault key (`cryptoKeyHex`) and the locked-vault buffer key
+ * (`bufferKeyHex`), so it is never opened to page contexts. `setAccessLevel`
+ * stays at its default and a content script hands its verbose events to the
+ * worker instead, which appends them with `appendRelayedEvents`.
  */
-export function enableSessionAccessForUntrustedContexts(): void {
-    try {
-        chrome.storage.session?.setAccessLevel?.({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
-    } catch (error) {
-        logEvent('startup', 'warn', 'session_access_level_failed', 'Could not widen session storage access', {
-            error: String(error),
-        });
-    }
+function isSessionRestrictedContext(): boolean {
+    return diagnosticContext === 'content';
 }
 
 // -----------------------------------------------------------------------------
@@ -268,7 +263,11 @@ export function logEvent(
 
     // Mirror into session storage only in developer mode. Errors are already
     // durable through the error log, so this never loses the important ones.
-    if (devMode) schedulePersist();
+    // A page context cannot reach the session area, so it relays instead.
+    if (devMode) {
+        if (isSessionRestrictedContext()) scheduleRelay(entry);
+        else schedulePersist();
+    }
 }
 
 /** Normalizes anything thrown into a message plus a stack. */
@@ -342,6 +341,66 @@ async function appendErrorLog(message: string, context?: string): Promise<void> 
 }
 
 // -----------------------------------------------------------------------------
+// Relay (untrusted contexts)
+// -----------------------------------------------------------------------------
+
+// Events a content script is holding for the worker. `chrome.storage.session`
+// is not readable from a page context, so the worker is the only writer.
+let relayTimer: ReturnType<typeof setTimeout> | null = null;
+let relayQueue: DiagnosticEvent[] = [];
+
+function scheduleRelay(entry: DiagnosticEvent): void {
+    relayQueue.push(entry);
+    if (relayTimer) return;
+    relayTimer = setTimeout(() => {
+        relayTimer = null;
+        const batch = relayQueue;
+        relayQueue = [];
+        if (batch.length === 0) return;
+        try {
+            chrome.runtime.sendMessage({ type: 'DIAGNOSTIC_EVENTS', events: batch }).catch((error) => {
+                // The worker can be mid-restart, which makes this expected, so it
+                // stays a session warning rather than a durable error.
+                logEvent('content', 'warn', 'diagnostics_relay_failed', 'Could not hand events to the background worker', {
+                    error: String(error),
+                    count: batch.length,
+                });
+            });
+        } catch (error) {
+            logEvent('content', 'warn', 'diagnostics_relay_unavailable', 'Messaging is unavailable while relaying events', {
+                error: String(error),
+                count: batch.length,
+            });
+        }
+    }, PERSIST_DEBOUNCE_MS);
+}
+
+/** Shape check for events arriving over messaging from a page context. */
+function isDiagnosticEvent(value: unknown): value is DiagnosticEvent {
+    if (!value || typeof value !== 'object') return false;
+    const entry = value as Partial<DiagnosticEvent>;
+    return typeof entry.id === 'string'
+        && typeof entry.timestamp === 'number'
+        && typeof entry.level === 'string'
+        && typeof entry.area === 'string'
+        && typeof entry.event === 'string'
+        && typeof entry.message === 'string';
+}
+
+/**
+ * Appends events relayed by a content script into the shared session log.
+ * Called by the background worker, the only context allowed to write there.
+ */
+export async function appendRelayedEvents(incoming: unknown): Promise<void> {
+    if (!Array.isArray(incoming)) return;
+    const valid = incoming.filter(isDiagnosticEvent);
+    if (valid.length === 0) return;
+    events = mergeEvents(events, valid);
+    notify();
+    await persistSessionEvents();
+}
+
+// -----------------------------------------------------------------------------
 // Session buffer (developer mode)
 // -----------------------------------------------------------------------------
 
@@ -354,6 +413,7 @@ function schedulePersist(): void {
 }
 
 async function persistSessionEvents(): Promise<void> {
+    if (isSessionRestrictedContext()) return;
     const area = sessionArea();
     if (!area) return;
     try {
@@ -391,6 +451,8 @@ function mergeEvents(a: DiagnosticEvent[], b: DiagnosticEvent[]): DiagnosticEven
  * worker and the content script.
  */
 export async function refreshSessionEvents(): Promise<DiagnosticEvent[]> {
+    // A page context can only see the events it already holds in memory.
+    if (isSessionRestrictedContext()) return events.slice();
     const area = sessionArea();
     if (!area) return events.slice();
     const stored = await readStoredEvents(area);

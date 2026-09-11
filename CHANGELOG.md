@@ -2,6 +2,16 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.7
+
+**What was fixed**
+
+- The Privacy Score now looks the same everywhere. The dashboard ring and the side panel and popup bar are coloured by the score band (green, amber, orange, or red), and the number is a single neutral colour. Previously the panel coloured its number and left its bar neutral, while the dashboard did the opposite.
+- The band is now also spelled out next to the score, so the colour is not the only thing carrying it. That matters for anyone who cannot separate amber, orange, and green.
+- Light mode's score colours are slightly deeper so they stay visible on the white card. Dark mode is unchanged.
+- The score ring is now a plain SVG circle instead of a chart library drawing. It still animates, but the animation now stops for anyone whose system is set to reduce motion, which the library's animation ignored.
+- The ring's leading edge is rounded and closes over its own start at a full score, instead of butting against it.
+
 ## v1.7.6
 
 **What was fixed**

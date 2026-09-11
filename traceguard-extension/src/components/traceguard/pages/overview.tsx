@@ -6,6 +6,7 @@ import { SectionCards } from "@/components/section-cards"
 import { RadialChartScore } from "@/components/radial-chart-score"
 import { useDetectorLogs, useSiteCache } from "@/lib/useStorage"
 import { DetectorType } from "@/lib/types"
+import { WSS_WEIGHTS } from "@/lib/scoring"
 
 export default function OverviewPage() {
   const { t } = useTranslation()
@@ -35,12 +36,16 @@ export default function OverviewPage() {
       group.detectors[log.detector] = { score: log.score, details: log.details || {} }
     }
 
+    // The canonical weights live in scoring.ts (explainWSS). Detector log names
+    // ("inputs") are mapped onto the ScoreBreakdown keys ("input") so this
+    // fallback can never disagree with the popup, the side panel, or the score
+    // the background worker stored.
     const weights: Record<string, number> = {
-      reputation: 0.30,
-      tracking: 0.30,
-      cookies: 0.20,
-      inputs: 0.15,
-      policy: 0.05,
+      reputation: WSS_WEIGHTS.reputation,
+      tracking: WSS_WEIGHTS.tracking,
+      cookies: WSS_WEIGHTS.cookies,
+      inputs: WSS_WEIGHTS.input,
+      policy: WSS_WEIGHTS.policy,
       permissions: 0
     }
 
@@ -142,6 +147,7 @@ export default function OverviewPage() {
 
   return (
     <>
+      <h1 className="text-3xl font-bold tracking-tight">{t("Overview")}</h1>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-1 h-full">
           <RadialChartScore timeRange={timeRange} />

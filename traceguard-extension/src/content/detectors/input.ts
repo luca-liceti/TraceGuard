@@ -86,6 +86,27 @@ export function detectSensitiveInputs(): InputDetectionResult {
     const medium: SensitiveField[] = [];
     const low: SensitiveField[] = [];
 
+    // Label text is needed for every field, and a page can hold thousands of
+    // labels. Querying and filtering the whole document once per input made this
+    // loop O(inputs x labels); index the labels once instead, by `for` target and
+    // by the control they wrap, so each input does a constant-time lookup.
+    const labelsByFor = new Map<string, string[]>();
+    const labelsByControl = new WeakMap<Element, string[]>();
+    for (const label of document.querySelectorAll('label')) {
+        const text = label.textContent?.trim();
+        if (!text) continue;
+        if (label.htmlFor) {
+            const existing = labelsByFor.get(label.htmlFor);
+            if (existing) existing.push(text);
+            else labelsByFor.set(label.htmlFor, [text]);
+        }
+        for (const control of label.querySelectorAll('input, textarea')) {
+            const existing = labelsByControl.get(control);
+            if (existing) existing.push(text);
+            else labelsByControl.set(control, [text]);
+        }
+    }
+
     for (const input of inputs) {
         const element = input as HTMLInputElement | HTMLTextAreaElement;
         const type = element.type?.toLowerCase() || '';
@@ -112,15 +133,17 @@ export function detectSensitiveInputs(): InputDetectionResult {
         const nameAttr = (element.getAttribute('name') || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
         const idAttr = (element.getAttribute('id') || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
 
+        const ownLabels = [
+            ...(element.id ? labelsByFor.get(element.id) ?? [] : []),
+            ...(labelsByControl.get(element) ?? []),
+        ].join(' ');
         const rawMetadata = [
             element.getAttribute('placeholder'),
             element.getAttribute('aria-label'),
             ariaLabelledbyText,
             nameAttr,
             idAttr,
-            ...Array.from(document.querySelectorAll('label'))
-                .filter(label => label.htmlFor === element.id || label.contains(element))
-                .map(label => label.textContent)
+            ownLabels
         ].filter(Boolean).join(' ');
         const visibleMetadata = rawMetadata.toLowerCase();
         // "unit" is ambiguous (apartment unit vs. e-commerce quantity), so it is

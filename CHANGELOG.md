@@ -2,6 +2,17 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.5
+
+**What was fixed**
+
+- The Overview page has a top-level heading, so screen readers and the document outline see the same structure as the Rankings, Activity, and Settings pages.
+- Locking the extension, clearing activity logs, and resetting your score now use the app's own confirmation dialog instead of the browser's plain confirmation box. The dialog follows your light or dark theme, is translated, and can be dismissed with the keyboard.
+- Animations are turned off when your operating system is set to reduce motion. Slide, pulse, and chart animation no longer play in that mode.
+- Page analysis no longer rescans every label in the document once per input field. On form-heavy pages this removes a large amount of duplicate work from each analysis.
+- The Overview page reads the detector weights from the same source as the score itself, so its fallback can no longer disagree with the popup and the side panel.
+- The "no data yet" hint on the score chart now meets the contrast requirement instead of rendering below it.
+
 ## v1.7.4
 
 **What was fixed**

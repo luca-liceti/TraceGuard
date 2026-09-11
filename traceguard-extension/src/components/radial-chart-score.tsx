@@ -84,7 +84,7 @@ export function RadialChartScore({ timeRange = "30d" }: { timeRange?: string }) 
             </div>
             <div>
               <p className="text-sm font-medium text-muted-foreground">{t("No data yet")}</p>
-              <p className="text-xs text-muted-foreground/70 mt-0.5">{t("Your privacy score will appear here.")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("Your privacy score will appear here.")}</p>
             </div>
           </div>
         ) : (

@@ -40,6 +40,16 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useSiteCache } from "@/lib/useStorage"
@@ -54,6 +64,14 @@ import { useAuth } from "@/components/traceguard/auth-provider"
 
 const MAX_VISIBLE_SITES = 5
 
+/** A destructive quick action the user must confirm before it runs. */
+interface ConfirmAction {
+  title: string
+  description: string
+  confirmLabel: string
+  onConfirm: () => Promise<void> | void
+}
+
 export function SearchCommand() {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -67,6 +85,7 @@ export function SearchCommand() {
   const [selectedDomain, setSelectedDomain] = React.useState<string>("")
   const [isSitePanelOpen, setIsSitePanelOpen] = React.useState(false)
   const [exportOpen, setExportOpen] = React.useState(false)
+  const [pendingConfirm, setPendingConfirm] = React.useState<ConfirmAction | null>(null)
 
   // ⌘K shortcut
   React.useEffect(() => {
@@ -108,12 +127,24 @@ export function SearchCommand() {
 
   // ── Quick Actions ──────────────────────────────────────────────────────────
 
-  const handleLockExtension = () => {
+  // Destructive actions close the palette and raise a themed confirmation
+  // dialog. The native `confirm()` blocked the whole page, ignored the theme and
+  // translations, and could not be dismissed with the keyboard the way the rest
+  // of the app's dialogs can.
+  const requestConfirmation = (action: ConfirmAction) => {
     setOpen(false)
-    setTimeout(() => {
-      if (!confirm(t("Lock TraceGuard? You will need to re-enter your Master Password to continue."))) return
-      lock()
-    }, 50)
+    setTimeout(() => setPendingConfirm(action), 50)
+  }
+
+  const handleLockExtension = () => {
+    requestConfirmation({
+      title: t("Lock TraceGuard?"),
+      description: t("You will need to re-enter your Master Password to continue."),
+      confirmLabel: t("Lock Extension"),
+      onConfirm: () => {
+        lock()
+      },
+    })
   }
 
   const handleExportData = () => {
@@ -123,30 +154,36 @@ export function SearchCommand() {
     }, 50)
   }
 
-  const handleClearLogs = async () => {
-    setOpen(false)
-    setTimeout(async () => {
-      if (!confirm(t("Clear all activity logs? This cannot be undone."))) return
-      await storage.clearActivityLogs()
-      toast.add({
-        type: "success",
-        title: t("Activity Logs Cleared"),
-        description: t("All logged events have been removed."),
-      })
-    }, 50)
+  const handleClearLogs = () => {
+    requestConfirmation({
+      title: t("Clear all activity logs?"),
+      description: t("This cannot be undone."),
+      confirmLabel: t("Clear Activity Logs"),
+      onConfirm: async () => {
+        await storage.clearActivityLogs()
+        toast.add({
+          type: "success",
+          title: t("Activity Logs Cleared"),
+          description: t("All logged events have been removed."),
+        })
+      },
+    })
   }
 
-  const handleResetScore = async () => {
-    setOpen(false)
-    setTimeout(async () => {
-      if (!confirm(t("Reset your Privacy Score to 100? This will clear your browsing history data."))) return
-      await storage.resetScore()
-      toast.add({
-        type: "success",
-        title: t("Privacy Score Reset"),
-        description: t("Your UPS has been reset to 100."),
-      })
-    }, 50)
+  const handleResetScore = () => {
+    requestConfirmation({
+      title: t("Reset your Privacy Score to 100?"),
+      description: t("This will clear your browsing history data."),
+      confirmLabel: t("Reset Privacy Score"),
+      onConfirm: async () => {
+        await storage.resetScore()
+        toast.add({
+          type: "success",
+          title: t("Privacy Score Reset"),
+          description: t("Your UPS has been reset to 100."),
+        })
+      },
+    })
   }
 
   // ── Data processing ────────────────────────────────────────────────────────
@@ -374,6 +411,32 @@ export function SearchCommand() {
       />
 
       <ExportDataDialog open={exportOpen} onOpenChange={setExportOpen} />
+
+      <AlertDialog
+        open={pendingConfirm !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingConfirm(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingConfirm?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{pendingConfirm?.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const action = pendingConfirm
+                setPendingConfirm(null)
+                void action?.onConfirm()
+              }}
+            >
+              {pendingConfirm?.confirmLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

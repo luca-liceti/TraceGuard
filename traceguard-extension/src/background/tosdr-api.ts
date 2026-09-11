@@ -115,6 +115,7 @@ function gradeToScore(grade: string | undefined): number {
 }
 
 import { getTosDRMap } from './services/database-loader';
+import { captureError, logEvent } from '../lib/diagnostics';
 import { storage } from '../lib/storage';
 import { rateLimiters } from '../lib/rate-limiter';
 import { fetchWithTimeout } from '../lib/utils';
@@ -192,7 +193,7 @@ async function fetchFromTosdr(domain: string): Promise<TosDRResult | null> {
             return null;
         });
     } catch (err) {
-        console.error('[ToS;DR] Fetch error:', err);
+        captureError('enrich', err, 'tosdr_fetch_failed', { host: domain });
     }
     return null;
 }
@@ -233,10 +234,10 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
         const ttlMs = isNegative ? NEGATIVE_TTL_MS : refreshMs;
         const isStale = (Date.now() - cachedEntry.timestamp) > ttlMs;
         if (isStale) {
-            console.log(`[ToS;DR] Cached rating stale for ${domain}, triggering lazy update`);
+            logEvent('enrich', 'debug', 'tosdr_cache_stale', 'Cached rating is stale, refreshing', { host: domain, negative: isNegative });
             triggerLazyUpdate(); // fire and forget
         } else {
-            console.log(`[ToS;DR] Cache hit for ${domain}`);
+            logEvent('enrich', 'debug', 'tosdr_cache_hit', 'Cached rating used', { host: domain, score: cachedEntry.data?.score });
         }
 
         // A negative (found:false) result must never shadow a bundled seed
@@ -247,7 +248,7 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
             const seedMap = await getTosDRMap();
             const seedResult = Object.prototype.hasOwnProperty.call(seedMap, domain) ? seedMap[domain] : undefined;
             if (seedResult) {
-                console.log(`[ToS;DR] Negative cache overridden by bundled seed for ${domain}`);
+                logEvent('enrich', 'debug', 'tosdr_seed_overrode_negative', 'Bundled seed rating overrode a cached miss', { host: domain });
                 return seedResult as TosDRResult;
             }
         }
@@ -265,10 +266,10 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
         
         // If missing timestamp or explicitly stale, trigger an update
         if (isStale || seedTimestamp === 0) {
-            console.log(`[ToS;DR] Seed rating stale for ${domain}, triggering lazy update`);
+            logEvent('enrich', 'debug', 'tosdr_seed_stale', 'Bundled seed rating is stale, refreshing', { host: domain, lastUpdated: seedTimestamp });
             triggerLazyUpdate();
         } else {
-            console.log(`[ToS;DR] Valid seed rating for ${domain}`);
+            logEvent('enrich', 'debug', 'tosdr_seed_used', 'Bundled seed rating used', { host: domain, score: seedResult.score, grade: seedResult.grade });
         }
         
         return seedResult as TosDRResult;
@@ -276,7 +277,7 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
     
     // 3. Not in seed, not in cache
     if (enableCloud) {
-        console.log(`[ToS;DR] Fetching dynamically for niche domain: ${domain}`);
+        logEvent('enrich', 'debug', 'tosdr_dynamic_fetch', 'No local rating, fetching from ToS;DR', { host: domain });
         const fresh = await fetchFromTosdr(domain);
         if (fresh) {
             await saveCache(domain, { data: fresh, timestamp: Date.now() });
@@ -289,7 +290,7 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
         return fallback;
     }
     
-    console.log(`[ToS;DR] No local rating and cloud disabled for: ${domain}`);
+    logEvent('enrich', 'debug', 'tosdr_no_rating_cloud_disabled', 'No local rating and cloud lookup is disabled', { host: domain });
     return { found: false, score: 0, source: 'fallback' };
 }
 
@@ -299,5 +300,5 @@ export async function checkTosDR(url: string): Promise<TosDRResult> {
 export async function clearTosDRCache(): Promise<void> {
     inMemoryCache = {};
     await chrome.storage.local.remove('tosdr_cache');
-    console.log('[ToS;DR] Dynamic cache cleared');
+    logEvent('enrich', 'debug', 'tosdr_cache_cleared', 'Dynamic ToS;DR cache cleared');
 }

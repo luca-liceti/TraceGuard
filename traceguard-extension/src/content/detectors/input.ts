@@ -1,3 +1,5 @@
+import { logEvent } from '../../lib/diagnostics';
+
 /**
  * =============================================================================
  * INPUT DETECTOR - Finding Sensitive Form Fields
@@ -206,29 +208,21 @@ export function detectSensitiveInputs(): InputDetectionResult {
         ? 100
         : Math.max(0, Math.round(100 - (K * Math.log2(weightedCount + 1))));
 
-    // Comprehensive console logging (field TYPES only, NO values)
-    console.log('[Input Detector] Starting analysis...');
-    console.log('[Input] Total input fields found:', inputs.length);
-    console.log('[Input] Sensitive fields detected:', {
-        'HIGH sensitivity (passwords, cards)': high.length,
-        'MEDIUM sensitivity (email, phone, address)': medium.length,
-        'LOW sensitivity (name, username)': low.length,
-        'Weighted count': weightedCount
+    // One structured record of the whole scan, field TYPES only and never values.
+    // This replaces eight console.log lines that disappeared with the devtools
+    // console, which is why a surprising field score used to be unreproducible.
+    logEvent('detector', 'debug', 'input_scored', 'Input detector scored', {
+        totalFields: inputs.length,
+        high: high.length,
+        medium: medium.length,
+        low: low.length,
+        highTypes: high.map(field => field.type),
+        mediumTypes: medium.map(field => field.type),
+        lowTypes: low.map(field => field.type),
+        weightedCount,
+        weight: K,
+        score,
     });
-
-    // Log field types (NOT values - zero PII storage)
-    if (high.length > 0) {
-        console.log('[Input] HIGH sensitivity field types:', high.map(f => f.type));
-    }
-    if (medium.length > 0) {
-        console.log('[Input] MEDIUM sensitivity field types:', medium.map(f => f.type));
-    }
-    if (low.length > 0) {
-        console.log('[Input] LOW sensitivity field types:', low.map(f => f.type));
-    }
-
-    console.log(`[Input] Logarithmic calculation: max(0, 100 - 10×log2(${weightedCount}+1)) = ${score}`);
-    console.log(`[Input] Final Score: ${score} (${score >= 80 ? '✅ Safe' : score >= 60 ? '🔵 Low Risk' : score >= 40 ? '🟡 Medium' : '🟠 High Risk'})`);
 
     return {
         score,

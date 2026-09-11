@@ -2,6 +2,15 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.0
+
+**What's new**
+
+- Developer mode records the full arithmetic behind your privacy score. Every UPS event (visit penalty, PII entry penalty, focus penalty, safe-site recovery, and safe-streak bonus or break) is now written as structured numbers instead of an ASCII tree in a console that disappears.
+- The policy pipeline explains itself. Each rating lookup reports whether it came from the dynamic cache, the bundled seed, or a live fetch, whether a cached rating was stale, whether the seed overrode a cached miss, and whether the cloud lookup was disabled.
+- Enrichment reports its hit rate. Cookies are counted by whether the Open Cookie Database identified them or the name-length heuristic guessed, and tracker candidates are counted by whether a database recognized them or they were dropped.
+- Every personal-information decision is recorded: the gate evaluation (site score, reputation, allow list, reason), whether the confirmation card was shown, duplicate skips, and the penalty arithmetic with the resulting score.
+
 ## v1.6.0
 
 **What's new**

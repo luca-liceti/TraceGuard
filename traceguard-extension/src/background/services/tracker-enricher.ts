@@ -5,6 +5,7 @@
  */
 
 import { TrackerDetail, NetworkRequestDetail } from '../../lib/types';
+import { logEvent } from '../../lib/diagnostics';
 import { lookupTrackerDomain, getDisconnectCategory, getDisconnectEntity, isTrackerDomain } from './database-loader';
 
 export async function enrichTrackers(
@@ -14,6 +15,9 @@ export async function enrichTrackers(
 ): Promise<TrackerDetail[]> {
     const enriched: TrackerDetail[] = [];
     const seenDomains = new Set<string>();
+    // Candidates the databases did not recognise, counted so "0 trackers" on a
+    // page full of third-party requests can be told apart from a broken lookup.
+    const dropped = { sameParty: 0, notInDatabase: 0 };
     
     const pageHost = new URL(url).hostname;
     
@@ -24,6 +28,7 @@ export async function enrichTrackers(
         // boundaries so a lookalike domain (e.g. "notexample.com" vs
         // "example.com") is never mistaken for the same party.
         if (domain === pageHost || domain.endsWith('.' + pageHost) || pageHost.endsWith('.' + domain)) {
+            dropped.sameParty += 1;
             return;
         }
         
@@ -32,6 +37,7 @@ export async function enrichTrackers(
         // script/image/iframe (CDNs, fonts, APIs) - without this filter those
         // would flood the tracker table as "unknown org" non-trackers.
         if (!(await isTrackerDomain(domain))) {
+            dropped.notInDatabase += 1;
             return;
         }
         
@@ -101,5 +107,12 @@ export async function enrichTrackers(
         }
     }
     
+    logEvent('enrich', 'debug', 'trackers_enriched', 'Tracker candidates classified', {
+        identified: enriched.length,
+        droppedSameParty: dropped.sameParty,
+        droppedNotInDatabase: dropped.notInDatabase,
+        missingOrganization: enriched.filter(tracker => !tracker.organization).length,
+    });
+
     return enriched;
 }

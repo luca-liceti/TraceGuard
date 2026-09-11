@@ -7,6 +7,7 @@
 import { CookieDetail } from '../../lib/types';
 import { lookupCookie, lookupTrackerDomain } from './database-loader';
 import { SetCookieRecord } from '../../lib/set-cookie';
+import { logEvent } from '../../lib/diagnostics';
 
 export async function enrichCookies(
     url: string,
@@ -15,6 +16,9 @@ export async function enrichCookies(
 ): Promise<CookieDetail[]> {
     const enriched: CookieDetail[] = [];
     const seenNames = new Set<string>();
+    // A cookie classified by the Open Cookie Database and one classified by the
+    // name-length heuristic look identical in the result, so keep them apart.
+    const source = { database: 0, heuristic: 0 };
 
     const pageHost = new URL(url).hostname;
     
@@ -25,6 +29,8 @@ export async function enrichCookies(
         
         // Lookup in Cookie Database
         const dbEntry = await lookupCookie(name);
+        if (dbEntry) source.database += 1;
+        else source.heuristic += 1;
         
         // Determine first/third party. Use explicit dot boundaries so a
         // lookalike domain ("notexample.com") is not treated as the same
@@ -96,5 +102,13 @@ export async function enrichCookies(
         }
     }
     
+    logEvent('enrich', 'debug', 'cookies_enriched', 'Cookies classified', {
+        total: enriched.length,
+        fromDatabase: source.database,
+        fromHeuristic: source.heuristic,
+        unclassified: enriched.filter(cookie => cookie.category === 'unclassified').length,
+        thirdParty: enriched.filter(cookie => cookie.isThirdParty).length,
+    });
+
     return enriched;
 }

@@ -20,6 +20,7 @@
 ## Diagnostics and failure reporting
 
 - Every failure path reports through `src/lib/diagnostics.ts`. Never ship a silent failure: no empty `catch {}`, no `.catch(() => {})`, and no `catch` that only writes to a console nobody has attached.
+- Do not use `console.*` for anything worth knowing later. Signatures, cache decisions, and calculation steps belong in `logEvent`, not in a tree of `console.log` lines that dies with the devtools console. Deprecation notices are the only exception.
 - Classify each `catch` when you write it. A genuine bug or broken invariant uses `captureError(area, error, eventName)`, which also lands in the durable error log. A transient or expected condition (worker asleep, network offline, invalid URL, optional data absent) uses `logEvent(area, 'warn', eventName, message)`, which stays in the session log.
 - Pass only what is needed to reproduce the failure: host names, detector names, scores, error strings, and field types. Never log full URLs or anything the user typed.
 - Keep the global `error` and `unhandledrejection` handlers installed in every context: the background service worker, the content script, the popup, the side panel, and the dashboard. Call `setDiagnosticContext(area)` beside the installation so an uncaught error names the context that raised it. Removing either is a regression.

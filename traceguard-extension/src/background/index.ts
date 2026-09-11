@@ -1230,7 +1230,7 @@ async function resolveSiteScore(domain: string, key: CryptoKey | null): Promise<
         const site = siteCache[domain];
         return { wss: site?.wss ?? 50, reputation: site?.breakdown?.reputation };
     } catch (error) {
-        console.warn('[PII] Failed to resolve site score:', error);
+        captureError('pii', error, 'site_score_resolve_failed');
         return { wss: 50, reputation: undefined };
     }
 }
@@ -1327,12 +1327,20 @@ async function askForSiteConfirmation(
 
 async function handlePIIDetection(message: any, tabId?: number) {
     const event = message.data;
-    console.log('[TraceGuard] PII event:', event);
+    logEvent('pii', 'debug', 'pii_detected', 'PII entry detected', {
+        host: event.site,
+        fieldType: event.fieldType,
+        sensitivity: event.sensitivity,
+        pageContext: event.pageContext,
+    });
 
     // A confirmation is already pending for this site - the pending event will
     // cover any further entries, so ignore this duplicate.
     if (pendingPIIConfirms.has(event.site)) {
-        console.log('[TraceGuard] Confirmation already pending for', event.site, '- ignoring duplicate PII event');
+        logEvent('pii', 'debug', 'pii_confirmation_pending', 'Duplicate PII event ignored, a confirmation is already pending', {
+            host: event.site,
+            fieldType: event.fieldType,
+        });
         return;
     }
 
@@ -1362,6 +1370,22 @@ async function handlePIIDetection(message: any, tabId?: number) {
         isBlacklisted: siteReputation === 0,
         isWhitelisted,
         pageContext: event.pageContext,
+    });
+
+    // The gate decision, recorded before anything is applied. Previously the only
+    // trace of this logic was the resulting score change, so a gate that never
+    // fired and a gate that always fired looked identical in the log.
+    logEvent('pii', 'debug', 'pii_gate_decision', 'PII risk gate evaluated', {
+        host: event.site,
+        fieldType: event.fieldType,
+        siteWSS,
+        siteReputation,
+        isWhitelisted,
+        penalize: decision.penalize,
+        reason: decision.reason,
+        willAskForConfirmation: decision.penalize && siteReputation !== 0
+            && (decision.reason === 'risky' || decision.reason === 'unnecessary')
+            && !promptedPIIConfirmDomains.has(event.site),
     });
 
     // Outlier sites (risky WSS or an unnecessary data ask, not blacklisted):
@@ -1429,7 +1453,10 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: 
     // Skip duplicates (e.g. a form re-rendering mid-typing) so they can't
     // re-apply penalties or spam notifications.
     if (piiDetections.some((p: any) => p.site === event.site && p.fieldType === event.fieldType)) {
-        console.log('[TraceGuard] Skipping duplicate PII event:', event.site, event.fieldType);
+        logEvent('pii', 'debug', 'pii_duplicate_skipped', 'Duplicate PII event skipped in the journal', {
+            host: event.site,
+            fieldType: event.fieldType,
+        });
         return;
     }
 
@@ -1539,9 +1566,21 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: 
         ups: newUPS                                                   // Your updated privacy score
     }));
 
-    console.log(isExempt
-        ? `[TraceGuard] PII exempted (${decision.reason}): ${event.fieldType} on ${event.site} - UPS unchanged at ${state.ups}`
-        : `[TraceGuard] UPS updated: ${state.ups} → ${newUPS} (PII events: ${newPiiCount})`);
+    // The outcome of the whole PII path, including the penalty arithmetic, so an
+    // unexpected score drop can be traced to the entry that caused it.
+    logEvent('pii', 'debug', 'pii_finalized', isExempt ? 'PII entry exempted from penalty' : 'PII penalty applied', {
+        host: event.site,
+        fieldType: event.fieldType,
+        sensitivity: event.sensitivity,
+        isExempt,
+        reason: decision.reason,
+        confirmedSafe,
+        siteWSS,
+        scoreImpact,
+        previousUPS: state.ups,
+        newUPS,
+        piiEventsCount: newPiiCount,
+    });
 
     // Expected-use entries (login, 2FA codes, gov sites, verified sectors, or
     // sites the user vouched for via the confirmation card) are logged and
@@ -1582,7 +1621,10 @@ async function finalizePIIDetection(event: any, confirmedSafe: boolean, tabId?: 
         const emit = (id: number) => {
             chrome.tabs.sendMessage(id, payload).catch(error => {
                 // If the toast fails to show, it's not critical - just log it
-                console.warn('Failed to send toast notification:', error);
+                logEvent('pii', 'warn', 'pii_toast_undeliverable', 'Could not show the PII toast', {
+                    host: event.site,
+                    error: String(error),
+                });
             });
         };
         const fallbackToActiveTab = () => {

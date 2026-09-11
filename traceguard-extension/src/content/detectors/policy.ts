@@ -170,8 +170,20 @@ export async function detectPrivacyPolicyDetailed(): Promise<PolicyDetectionResu
         logEvent('detector', 'warn', 'policy_tosdr_check_failed', 'ToS;DR rating lookup failed', { error: String(error) });
     }
 
+    // Record why the fallback score was chosen. The analyzer logs the score it
+    // receives, but only this knows whether the ToS;DR lookup missed, the page
+    // had no privacy link, or the link was there and unrated, which are three
+    // very different reasons for the same 50.
+    const fallbackScore = localResult.found ? 50 : 25;
+    logEvent('detector', 'debug', 'policy_fallback_scored', 'Policy detector fell back to local detection', {
+        score: fallbackScore,
+        hasLocalPolicy: localResult.found,
+        linkCount: localResult.links.length,
+        reason: localResult.found ? 'privacy link found, no ToS;DR rating' : 'no privacy link, no ToS;DR rating',
+    });
+
     return {
-        score: localResult.found ? 50 : 25,
+        score: fallbackScore,
         source: localResult.found ? 'local' : 'fallback',
         hasLocalPolicy: localResult.found
     };

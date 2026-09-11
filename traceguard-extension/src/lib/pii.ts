@@ -43,6 +43,7 @@
  */
 
 import { getSiteSector, isGovernmentDomain, isHighTierField, isSecurityCodeField, isTrustedDomain, sectorNeedsField, normalizeFieldType } from './pii-sectors';
+import { logEvent } from './diagnostics';
 
 // ============================================================================
 // PII PATTERNS (for content scanning)
@@ -189,11 +190,17 @@ export function calculateVisitPenalty(currentUPS: number, siteWSS: number): Visi
         message = `Visited ${riskLevel} site (WSS ${clampedWSS}): -${roundedPenalty.toFixed(1)} UPS`;
     }
 
-    console.log(`[UPS Visit Penalty] Calculation:`);
-    console.log(`├── Current UPS: ${currentUPS}`);
-    console.log(`├── Site WSS: ${clampedWSS}`);
-    console.log(`├── Formula: ((100 - ${clampedWSS}) / 100) × 2 = ${roundedPenalty.toFixed(2)}`);
-    console.log(`└── New UPS: ${newUPS}`);
+    // The full calculation as one structured record. This used to be five
+    // console.log lines drawing a tree, which vanished when devtools closed and
+    // left no way to check the arithmetic after the fact.
+    logEvent('pii', 'debug', 'visit_penalty', 'Visit penalty calculated', {
+        currentUPS,
+        siteWSS,
+        clampedWSS,
+        penalty: roundedPenalty,
+        newUPS,
+        message,
+    });
 
     return { penalty: roundedPenalty, newUPS, message };
 }
@@ -243,14 +250,17 @@ export function calculatePIIPenalty(
     const riskLevel = clampedWSS >= 70 ? 'safe' : clampedWSS >= 40 ? 'medium-risk' : 'risky';
     const message = `Entered ${fieldType} on ${riskLevel} site (WSS ${clampedWSS}): -${penalty} UPS`;
 
-    console.log(`[UPS PII Penalty] Calculation:`);
-    console.log(`├── Field Type: ${fieldType}`);
-    console.log(`├── Base Penalty: ${basePenalty}`);
-    console.log(`├── Site WSS: ${clampedWSS}`);
-    console.log(`├── Context Multiplier: 1 + ((100 - ${clampedWSS}) / 100) = ${contextMultiplier.toFixed(2)}`);
-    console.log(`├── Final Penalty: ${basePenalty} × ${contextMultiplier.toFixed(2)} = ${penalty}`);
-    console.log(`├── Current UPS: ${currentUPS}`);
-    console.log(`└── New UPS: ${newUPS}`);
+    logEvent('pii', 'debug', 'pii_penalty', 'PII entry penalty calculated', {
+        fieldType,
+        basePenalty,
+        siteWSS,
+        clampedWSS,
+        contextMultiplier: Math.round(contextMultiplier * 100) / 100,
+        penalty,
+        currentUPS,
+        newUPS,
+        riskLevel,
+    });
 
     return { penalty, newUPS, message };
 }
@@ -496,7 +506,14 @@ export function calculateFocusPenalty(
     const newUPS = Math.max(0, Math.round((currentUPS - penalty) * 10) / 10);
     const message = penalty > 0 ? `Focused on ${fieldType} field: -${penalty.toFixed(1)} UPS` : '';
 
-    console.log(`[UPS Focus Penalty] ${fieldType}: -${penalty.toFixed(1)} (20% of full penalty)`);
+    logEvent('pii', 'debug', 'focus_penalty', 'Focus penalty calculated', {
+        fieldType,
+        basePenalty,
+        clampedWSS,
+        fullPenalty: Math.round(fullPenalty * 100) / 100,
+        penalty,
+        newUPS,
+    });
 
     return { penalty, newUPS, message };
 }
@@ -549,7 +566,10 @@ export function calculateRecovery(
             if (newStreak > 0 && newStreak % 10 === 0) {
                 recovery += 0.5;
                 message = `🎉 Safe streak bonus! +0.5 UPS (${newStreak} safe sites in a row)`;
-                console.log(`[UPS Recovery] ${message}`);
+                logEvent('pii', 'debug', 'streak_bonus', 'Safe streak bonus applied', {
+                    streak: newStreak,
+                    recovery,
+                });
             }
 
             // Round recovery
@@ -563,7 +583,10 @@ export function calculateRecovery(
         // Risky site breaks the streak
         if (currentStreak > 0) {
             message = `Safe streak broken (${currentStreak} → 0) by site with WSS ${clampedWSS}`;
-            console.log(`[UPS Recovery] ${message}`);
+            logEvent('pii', 'debug', 'streak_broken', 'Safe streak broken by a risky site', {
+                previousStreak: currentStreak,
+                siteWSS: clampedWSS,
+            });
         }
         newStreak = 0;
     }
@@ -571,13 +594,15 @@ export function calculateRecovery(
     // Apply recovery (cap at 100)
     const newUPS = Math.min(100, Math.round((currentUPS + recovery) * 10) / 10);
 
-    console.log(`[UPS Recovery] Calculation:`);
-    console.log(`├── Site WSS: ${clampedWSS}`);
-    console.log(`├── Unique Domain Today: ${isUniqueDomain ? 'Yes' : 'No'}`);
-    console.log(`├── Qualifies for recovery: ${clampedWSS >= 70 && isUniqueDomain ? 'Yes' : 'No'}`);
-    console.log(`├── Streak: ${currentStreak} → ${newStreak}`);
-    console.log(`├── Recovery: ${recovery.toFixed(2)}`);
-    console.log(`└── UPS: ${currentUPS} → ${newUPS}`);
+    logEvent('pii', 'debug', 'recovery_applied', 'Recovery calculated', {
+        siteWSS: clampedWSS,
+        isUniqueDomain,
+        qualifies: clampedWSS >= 70 && isUniqueDomain,
+        streak: `${currentStreak}->${newStreak}`,
+        recovery,
+        currentUPS,
+        newUPS,
+    });
 
     return { recovery, newUPS, newStreak, message };
 }

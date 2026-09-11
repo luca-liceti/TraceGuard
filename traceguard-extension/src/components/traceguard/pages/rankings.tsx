@@ -44,17 +44,14 @@ import {
   Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { isThreatLog } from "@/lib/risk-utils"
+import { isThreatLog, SAFETY_CONFIGS } from "@/lib/risk-utils"
 
-// ─── Semantic color palette (detector-aware) ───────────────────────────────
-// Using standard shadcn theme colors
-const DETECTOR_COLORS: Record<string, string> = {
-  tracking:    "var(--chart-1)",
-  cookies:     "var(--chart-2)",
-  inputs:      "var(--chart-3)",
-  reputation:  "var(--chart-4)",
-  policy:      "var(--chart-5)",
-}
+// ─── Semantic color palette ────────────────────────────────────────────────
+// Colour on this page marks a scale. Every saturated fill comes from the
+// shared ordinal safety ramp in `risk-utils.ts`, so the WSS distribution, the
+// risk badges, and the PII rows all read from one source instead of three
+// parallel maps. Series that are nominal (the detector donut) or single-series
+// (activity, leaderboard) stay neutral, because colour there encodes nothing.
 
 const DETECTOR_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   tracking:    Activity,
@@ -72,22 +69,31 @@ const DETECTOR_LABELS: Record<string, string> = {
   policy:      "Privacy Policy",
 }
 
-// WSS bucket color palette (mirrors the safety badge semantics used
-// elsewhere in the app: excellent/good = success, fair = warning,
-// poor = alert, critical = destructive)
-const WSS_COLORS: Record<string, string> = {
-  Critical:  "var(--destructive)",
-  Poor:      "var(--alert)",
-  Fair:      "var(--warning)",
-  Good:      "var(--success)",
-  Excellent: "var(--success)",
+// WSS bins: five sequential steps, so "Good" and "Excellent" are no longer the
+// same green and the distribution reads as a ramp.
+const WSS_FILLS: Record<string, string> = {
+  Critical:  SAFETY_CONFIGS.critical.fill,
+  Poor:      SAFETY_CONFIGS.poor.fill,
+  Fair:      SAFETY_CONFIGS.fair.fill,
+  Good:      SAFETY_CONFIGS.good.fill,
+  Excellent: SAFETY_CONFIGS.excellent.fill,
 }
 
-// PII sensitivity colors
-const PII_COLORS: Record<string, string> = {
-  HIGH:   "var(--destructive)",
-  MEDIUM: "var(--warning)",
+// PII sensitivity, a three-step slice of the same ramp.
+const PII_FILLS: Record<string, string> = {
+  HIGH:   SAFETY_CONFIGS.critical.fill,
+  MEDIUM: SAFETY_CONFIGS.fair.fill,
   LOW:    "var(--muted-foreground)",
+}
+
+// Risk runs opposite to safety, so the ramp is inverted here: a low risk is the
+// safest green. The badge reuses the app's tinted-badge convention so it is
+// consistent with `getRiskLevelBadge` in `theme-utils.ts`.
+const RISK_STYLES: Record<string, { fill: string; badge: string }> = {
+  Low:      { fill: SAFETY_CONFIGS.good.fill,     badge: "text-success bg-success/10 border-success/30" },
+  Medium:   { fill: SAFETY_CONFIGS.fair.fill,     badge: "text-warning bg-warning/10 border-warning/30" },
+  High:     { fill: SAFETY_CONFIGS.poor.fill,     badge: "text-alert bg-alert/10 border-alert/30" },
+  Critical: { fill: SAFETY_CONFIGS.critical.fill, badge: "text-destructive bg-destructive/10 border-destructive/30" },
 }
 
 // Chart configs
@@ -95,16 +101,12 @@ const getActivityConfig = (t: any): ChartConfig => ({
   events: { label: t("Events Detected"), color: "var(--primary)" }
 })
 
-const leaderboardConfig = {
-  count: { label: "Threats Blocked", color: "var(--primary)" }
-} satisfies ChartConfig
-
 const getPieChartConfig = (t: any): ChartConfig => ({
-  tracking:    { label: t("Tracking"),    color: DETECTOR_COLORS.tracking },
-  cookies:     { label: t("Cookies"),     color: DETECTOR_COLORS.cookies },
-  inputs:      { label: t("Input Fields"), color: DETECTOR_COLORS.inputs },
-  reputation:  { label: t("Reputation"),  color: DETECTOR_COLORS.reputation },
-  policy:      { label: t("Privacy Policy"), color: DETECTOR_COLORS.policy },
+  tracking:    { label: t("Tracking"),    color: "var(--primary)" },
+  cookies:     { label: t("Cookies"),     color: "var(--primary)" },
+  inputs:      { label: t("Input Fields"), color: "var(--primary)" },
+  reputation:  { label: t("Reputation"),  color: "var(--primary)" },
+  policy:      { label: t("Privacy Policy"), color: "var(--primary)" },
 })
 
 const getWssConfig = (t: any): ChartConfig => ({
@@ -224,7 +226,6 @@ export default function RankingsPage() {
       domain,
       count,
       pct: total > 0 ? Math.round((count / total) * 100) : 0,
-      fill: "var(--primary)",
     }))
   }, [logs])
 
@@ -236,7 +237,7 @@ export default function RankingsPage() {
     logs.forEach(log => { if (counts[log.detector] !== undefined) counts[log.detector]++ })
     return Object.entries(counts)
       .filter(([_, count]) => count > 0)
-      .map(([name, value]) => ({ name, value, fill: DETECTOR_COLORS[name] }))
+      .map(([name, value]) => ({ name, value }))
   }, [logs])
 
   const totalCategoryEvents = categoryData.reduce((s, d) => s + d.value, 0)
@@ -263,7 +264,7 @@ export default function RankingsPage() {
         avgSafety >= 80 ? "Low" :
         avgSafety >= 50 ? "Medium" :
         avgSafety >= 20 ? "High" : "Critical"
-      return { detector, avgSafety, events: data.events, riskLevel }
+      return { detector, avgSafety, events: data.events, riskLevel, style: RISK_STYLES[riskLevel] }
     }).sort((a, b) => {
       const order = ['tracking', 'cookies', 'inputs', 'reputation', 'policy']
       const indexA = order.indexOf(a.detector)
@@ -291,7 +292,7 @@ export default function RankingsPage() {
         count: data.count,
         sensitivity: data.sensitivity,
         siteCount: data.sites.size,
-        fill: PII_COLORS[data.sensitivity] ?? PII_COLORS.LOW,
+        fill: PII_FILLS[data.sensitivity] ?? PII_FILLS.LOW,
       }))
   }, [piiLogs])
 
@@ -311,7 +312,7 @@ export default function RankingsPage() {
       category,
       count,
       pct: total > 0 ? Math.round((count / total) * 100) : 0,
-      fill: WSS_COLORS[category],
+      fill: WSS_FILLS[category],
     }))
   }, [sites])
 
@@ -502,7 +503,7 @@ export default function RankingsPage() {
                     paddingAngle={2}
                   >
                     {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill="var(--primary)" fillOpacity={1 - index * 0.15} />
+                      <Cell key={`cell-${index}`} fill="var(--primary)" />
                     ))}
                   </Pie>
                   {/* Center label */}
@@ -526,9 +527,9 @@ export default function RankingsPage() {
           </CardContent>
           {categoryData.length > 0 && (
             <div className="px-6 pb-4 flex flex-wrap gap-x-4 gap-y-1.5 justify-center">
-              {categoryData.map((d, index) => (
+              {categoryData.map((d) => (
                 <div key={d.name} className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-primary" style={{ opacity: 1 - index * 0.15 }} />
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-primary" />
                   <span className="text-xs text-muted-foreground">{t(DETECTOR_LABELS[d.name] || d.name)}</span>
                   <span className="text-xs font-semibold tabular-nums">{d.value}</span>
                 </div>
@@ -562,8 +563,8 @@ export default function RankingsPage() {
                             {row.events > 0 ? `${row.events} ${t("events")}` : t("No data")}
                           </span>
                           <Badge
-                            variant="secondary"
-                            className="text-xs px-1.5 py-0"
+                            variant="outline"
+                            className={cn("text-xs px-1.5 py-0", row.style.badge)}
                           >
                             {t(row.riskLevel)}
                           </Badge>
@@ -573,9 +574,10 @@ export default function RankingsPage() {
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                           <div
-                            className={cn("h-full rounded-full transition-all duration-500 bg-primary", row.events > 0 ? "opacity-80" : "opacity-20")}
+                            className={cn("h-full rounded-full transition-all duration-500", row.events > 0 ? "" : "opacity-20")}
                             style={{
                               width: `${row.events > 0 ? row.avgSafety : 100}%`,
+                              background: row.style.fill,
                             }}
                           />
                         </div>
@@ -610,13 +612,13 @@ export default function RankingsPage() {
               />
             ) : (
               <div className="space-y-3">
-                {piiData.map((entry, index) => (
+                {piiData.map((entry) => (
                   <div key={entry.type} className="space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span
-                          className="w-2 h-2 rounded-full flex-shrink-0 bg-primary"
-                          style={{ opacity: 1 - index * 0.2 }}
+                          className="w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ background: entry.fill }}
                         />
                         <span className="text-sm font-medium">{toLabel(t(entry.type))}</span>
                       </div>
@@ -631,10 +633,10 @@ export default function RankingsPage() {
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                       <div
-                        className="h-full rounded-full transition-all duration-500 bg-primary"
+                        className="h-full rounded-full transition-all duration-500"
                         style={{
                           width: `${Math.max((entry.count / (piiData[0]?.count || 1)) * 100, 4)}%`,
-                          opacity: 1 - index * 0.2,
+                          background: entry.fill,
                         }}
                       />
                     </div>
@@ -689,6 +691,11 @@ export default function RankingsPage() {
                   </Bar>
                 </BarChart>
               </ChartContainer>
+            )}
+            {wssTotalSites > 0 && (
+              <p className="sr-only">
+                {wssData.map(d => `${t(d.category)}: ${d.count}`).join(", ")}
+              </p>
             )}
           </CardContent>
         </Card>

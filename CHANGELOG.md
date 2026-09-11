@@ -2,6 +2,17 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.9
+
+**What was fixed**
+
+- The Web Safety Score Distribution chart now uses five distinct steps instead of repeating the same green for "Good" and "Excellent", and its bars are dark enough to read in light mode, where the previous green and amber sat below the minimum contrast for a chart.
+- "Risk Breakdown by Category" no longer shows every severity in grey. The Low, Medium, High, and Critical badge and bar now use the same safety ramp as the distribution chart, so the label and its colour agree.
+- "Sensitive Data Targeted" colours each row by sensitivity (high, medium, low) instead of fading every row from one grey. A high-sensitivity field type is now visually distinct from a low one.
+- The detector donut in "Threat Categories" no longer fades its slices by an arbitrary order. It is a nominal breakdown with no ranking, so it is drawn in one neutral colour and the legend carries the labels.
+- The distribution chart now has a screen-reader summary of its bars, like the threat-categories donut already had.
+- The safety ramp is set inside a new set of `--safety-*` tokens. Dark mode uses the exact colours it already had; light mode's five steps all meet the 4.5:1 text requirement, and the shared `--success`, `--warning`, and `--alert` tokens are untouched, so badges, toasts, and the data table are unaffected.
+
 ## v1.7.8
 
 **What was fixed**

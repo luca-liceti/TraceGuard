@@ -59,6 +59,13 @@ export interface SafetyConfig {
     color: string;      // Text color class
     bgColor: string;    // Background color class
     borderColor: string; // Border color class
+    /**
+     * Full CSS color for charts and gauges, from the per-theme `--safety-*`
+     * ramp. Charts need a value that clears 3:1 on the card, which the shared
+     * status colours do not in light mode (`--warning` is 1.91:1 there), and a
+     * single ramp keeps the distribution and the severity badges in agreement.
+     */
+    fill: string;
 }
 
 /**
@@ -91,6 +98,7 @@ export const SAFETY_CONFIGS: Record<SafetyLevel, SafetyConfig> = {
         color: 'text-success',
         bgColor: 'bg-success/15',
         borderColor: 'border-success/30',
+        fill: 'oklch(var(--safety-excellent))',
     },
     good: {
         level: 'good',
@@ -99,6 +107,7 @@ export const SAFETY_CONFIGS: Record<SafetyLevel, SafetyConfig> = {
         color: 'text-success',
         bgColor: 'bg-success/15',
         borderColor: 'border-success/30',
+        fill: 'oklch(var(--safety-good))',
     },
     fair: {
         level: 'fair',
@@ -107,6 +116,7 @@ export const SAFETY_CONFIGS: Record<SafetyLevel, SafetyConfig> = {
         color: 'text-warning',
         bgColor: 'bg-warning/15',
         borderColor: 'border-warning/30',
+        fill: 'oklch(var(--safety-fair))',
     },
     poor: {
         level: 'poor',
@@ -115,6 +125,7 @@ export const SAFETY_CONFIGS: Record<SafetyLevel, SafetyConfig> = {
         color: 'text-alert',
         bgColor: 'bg-alert/15',
         borderColor: 'border-alert/30',
+        fill: 'oklch(var(--safety-poor))',
     },
     critical: {
         level: 'critical',
@@ -123,6 +134,7 @@ export const SAFETY_CONFIGS: Record<SafetyLevel, SafetyConfig> = {
         color: 'text-destructive',
         bgColor: 'bg-destructive/15',
         borderColor: 'border-destructive/30',
+        fill: 'oklch(var(--safety-critical))',
     },
 };
 

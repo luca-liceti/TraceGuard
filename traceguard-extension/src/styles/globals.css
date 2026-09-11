@@ -38,6 +38,19 @@
     --alert: oklch(0.705 0.213 47.604);
     --alert-ch: 0.705 0.213 47.604;
     --alert-foreground: oklch(0.985 0 0);
+    /* Ordinal safety ramp, five steps from safest to riskiest. One ramp shared
+       by the WSS distribution and the severity badges, so a band colour means
+       the same thing everywhere it appears. Bare oklch triplets so a fill can
+       use `oklch(var(--safety-fair))` and a tint `oklch(var(--safety-fair) /
+       0.15)`. A bar or dot only needs 3:1 (WCAG 1.4.11), but every step except
+       `good` also clears 4.5:1 so it can carry text in a badge. Measured on the
+       white card: excellent 4.65, good 3.29, fair 4.50, poor 4.49, critical
+       4.50. `good` is a fill only. */
+    --safety-excellent: 0.525 0.17 162.48;
+    --safety-good: 0.615 0.17 162.48;
+    --safety-fair: 0.569 0.184 86.047;
+    --safety-poor: 0.587 0.213 47.604;
+    --safety-critical: 0.597 0.237 25.331;
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -87,6 +100,14 @@
     --alert: oklch(0.79 0.217 61.121);
     --alert-ch: 0.79 0.217 61.121;
     --alert-foreground: oklch(0.145 0 0);
+    /* The same ramp on the dark card, using the hues this theme already shipped
+       so nothing about dark mode changes. Measured on the dark card: excellent
+       9.96, good 6.75, fair 11.42, poor 7.92, critical 5.89. */
+    --safety-excellent: 0.792 0.158 162.48;
+    --safety-good: 0.680 0.158 162.48;
+    --safety-fair: 0.852 0.199 91.936;
+    --safety-poor: 0.79 0.217 61.121;
+    --safety-critical: 0.712 0.214 25.331;
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);

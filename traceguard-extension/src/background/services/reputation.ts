@@ -28,6 +28,7 @@
  */
 
 import { refreshThreatFeed } from './threat-feed';
+import { captureError, logEvent } from '../../lib/diagnostics';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -83,9 +84,13 @@ export async function loadBlacklist() {
         // (Checking if something is in a Set is much faster than searching an array)
         staticBlacklist = new Set(data.domains);
 
-        console.log(`[Reputation] Loaded ${staticBlacklist.size} domains into threat blocklist`);
+        logEvent('enrich', 'debug', 'blacklist_loaded', 'Threat blocklist loaded', {
+            domains: staticBlacklist.size,
+        });
     } catch (error) {
-        console.error('[Reputation] Failed to load threat blocklist:', error);
+        // An unloaded blacklist means every domain scores 100, "not on any known
+        // threat list", so this failure must never stay quiet.
+        captureError('enrich', error, 'blacklist_load_failed');
     }
 }
 
@@ -102,7 +107,9 @@ export async function refreshBlacklistFromRemote(): Promise<boolean> {
     const domains = await refreshThreatFeed();
     if (domains && domains.length > 0) {
         staticBlacklist = new Set(domains);
-        console.log(`[Reputation] Refreshed threat blocklist to ${staticBlacklist.size} domains`);
+        logEvent('enrich', 'debug', 'blacklist_refreshed', 'Threat blocklist refreshed', {
+            domains: staticBlacklist.size,
+        });
         return true;
     }
     return false;
@@ -124,7 +131,19 @@ export async function checkReputation(url: string): Promise<ReputationResult> {
     try {
         const domain = new URL(url).hostname;
 
-        console.log(`[Reputation] Checking ${domain}...`);
+        // One event per check, naming the layer that decided the score and the
+        // size of the loaded blacklist. A blacklistSize of 0 means reputation
+        // checks are effectively off and every site reads as clean, which is
+        // impossible to tell from the score alone.
+        const decide = (layer: string, score: number, checks: string[]) => {
+            logEvent('enrich', 'debug', 'reputation_checked', `${domain} scored ${score} in layer ${layer}`, {
+                host: domain,
+                layer,
+                score,
+                blacklistSize: staticBlacklist.size,
+            });
+            return { score, checks };
+        };
 
         // Get user's custom whitelist and blacklist from storage
         const result = await chrome.storage.local.get('settings');
@@ -136,28 +155,24 @@ export async function checkReputation(url: string): Promise<ReputationResult> {
 
         // LAYER 1: Whitelist takes absolute priority (force safe)
         if (userWhitelist.some(w => domainMatches(domain, w))) {
-            console.log(`[Reputation] Layer 1: ${domain} is WHITELISTED → 100 (safe)`);
-            return { score: 100, checks: ['Whitelisted by user'] };
+            return decide('user-whitelist', 100, ['Whitelisted by user']);
         }
 
         // LAYER 2: User blacklist (force critical)
         if (userBlacklist.some(b => domainMatches(domain, b))) {
-            console.log(`[Reputation] Layer 2: ${domain} is USER BLACKLISTED → 0 (critical)`);
-            return { score: 0, checks: ['Found in user blacklist'] };
+            return decide('user-blacklist', 0, ['Found in user blacklist']);
         }
 
         // LAYER 3: Static blacklist (known malicious domains)
         if (staticBlacklist.has(domain)) {
-            console.log(`[Reputation] Layer 3: ${domain} in STATIC BLACKLIST → 0 (critical)`);
-            return { score: 0, checks: ['Found in static blacklist of known malicious domains'] };
+            return decide('static-blacklist', 0, ['Found in static blacklist of known malicious domains']);
         }
 
         // LAYER 4: Default - safe
-        console.log(`[Reputation] All checks passed for ${domain} → 100 (safe)`);
-        return { score: 100, checks: [] };
+        return decide('default', 100, []);
 
     } catch (error) {
-        console.error('[Reputation] Error checking reputation:', error);
+        captureError('enrich', error, 'reputation_check_failed');
         return { score: 50, checks: ['Reputation check failed — score uncertain'] }; // Default to neutral if invalid URL
     }
 }
@@ -174,7 +189,8 @@ export function checkReputationSync(url: string): ReputationResult {
             return { score: 0, checks: ['Found in static blacklist of known malicious domains'] };
         }
         return { score: 100, checks: [] };
-    } catch {
+    } catch (error) {
+        captureError('enrich', error, 'reputation_check_failed', { mode: 'sync' });
         return { score: 50, checks: ['Reputation check failed — score uncertain'] };
     }
 }

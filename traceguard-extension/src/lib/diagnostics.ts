@@ -167,6 +167,24 @@ export function getDiagnosticContext(): DiagnosticArea {
     return diagnosticContext;
 }
 
+/**
+ * Allows content scripts to read and write the shared session log.
+ *
+ * `chrome.storage.session` is restricted to trusted contexts by default, so
+ * without this call the mirror inside a page fails (silently, by design) and
+ * everything the content script records is missing from an exported bundle.
+ * Only the background worker can widen access, and only at runtime.
+ */
+export function enableSessionAccessForUntrustedContexts(): void {
+    try {
+        chrome.storage.session?.setAccessLevel?.({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+    } catch (error) {
+        logEvent('startup', 'warn', 'session_access_level_failed', 'Could not widen session storage access', {
+            error: String(error),
+        });
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Developer mode
 // -----------------------------------------------------------------------------

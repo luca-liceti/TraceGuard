@@ -35,6 +35,42 @@ import { detectCookiesDetailed, detectCookiesRaw } from './detectors/cookie';   
 import { detectFingerprintingAttempts } from './detectors/fingerprinting';
 import { ScoreBreakdown } from '@/lib/types';                  // Type definitions
 import { calculateFingerprintingScore } from '@/lib/scoring';
+import { logEvent } from '@/lib/diagnostics';
+
+/**
+ * Runs one synchronous detector, times it, and records the raw observation next
+ * to the score it produced.
+ *
+ * Without this only the final WSS reaches the diagnostics bundle, so a wrong
+ * tracker count, an empty cookie scan, or a detector that quietly bailed cannot
+ * be spotted from an exported report. The duration is the other half: the policy
+ * detector waits on a network call, and a slow one there delays every analysis.
+ */
+function runDetector<T>(
+    name: string,
+    fn: () => T,
+    summarize: (result: T) => Record<string, unknown>
+): T {
+    const startedAt = Date.now();
+    try {
+        const result = fn();
+        logEvent('detector', 'debug', 'detector_ran', `${name} detector`, {
+            detector: name,
+            ms: Date.now() - startedAt,
+            ...summarize(result),
+        });
+        return result;
+    } catch (error) {
+        // The caller turns this into page_analysis_failed, which names no
+        // detector. Record which one broke before rethrowing.
+        logEvent('detector', 'warn', 'detector_threw', `${name} detector threw`, {
+            detector: name,
+            ms: Date.now() - startedAt,
+            error: String(error),
+        });
+        throw error;
+    }
+}
 
 export interface DetectionDetails {
     tracking: { count: number; known: number; suspicious: number };
@@ -72,11 +108,36 @@ export interface PageAnalysisResult {
  * Note: Detector logs are saved by the background worker to avoid duplicates
  */
 export async function analyzePage(): Promise<PageAnalysisResult> {
+    const analyzeStartedAt = Date.now();
+
     // Run all detectors
-    const trackingResult = detectTrackingDetailed();
-    const inputResult = detectSensitiveInputs();
-    const cookieResult = detectCookiesDetailed();
-    const fingerprintingAttempts = detectFingerprintingAttempts();
+    const trackingResult = runDetector('tracking', () => detectTrackingDetailed(), (result) => ({
+        weightedCount: result.trackerCount,
+        known: result.knownTrackers.length,
+        suspicious: result.suspiciousTrackers.length,
+        score: result.score,
+    }));
+    const inputResult = runDetector('input', () => detectSensitiveInputs(), (result) => ({
+        high: result.fields.high.length,
+        medium: result.fields.medium.length,
+        low: result.fields.low.length,
+        types: [...new Set([
+            ...result.fields.high.map(field => field.type),
+            ...result.fields.medium.map(field => field.type),
+            ...result.fields.low.map(field => field.type),
+        ])],
+        score: result.score,
+    }));
+    const cookieResult = runDetector('cookie', () => detectCookiesDetailed(), (result) => ({
+        total: result.total,
+        tracking: result.tracking,
+        thirdParty: result.thirdParty,
+        score: result.score,
+    }));
+    const fingerprintingAttempts = runDetector('fingerprinting', () => detectFingerprintingAttempts(), (result) => ({
+        techniques: [...new Set(result.map(attempt => attempt.technique))],
+        score: calculateFingerprintingScore(result.map(attempt => attempt.technique)),
+    }));
 
     // Reputation check is handled by the background service (user and local blacklists).
     // We pass a placeholder here; background will overwrite with actual score
@@ -89,8 +150,23 @@ export async function analyzePage(): Promise<PageAnalysisResult> {
         isCheckoutPage: inputResult.fields.high.some(field => field.type === 'credit card'),
     };
 
-    // Privacy policy check with ToS;DR API (async)
+    // Privacy policy check with ToS;DR API (async). Timed separately because it
+    // is the only detector that waits on the network.
+    const policyStartedAt = Date.now();
     const policyResult = await detectPrivacyPolicyDetailed();
+    logEvent('detector', 'debug', 'detector_ran', 'policy detector', {
+        detector: 'policy',
+        ms: Date.now() - policyStartedAt,
+        source: policyResult.source,
+        grade: policyResult.grade ?? null,
+        serviceId: policyResult.serviceId ?? null,
+        score: policyResult.score,
+    });
+
+    logEvent('scoring', 'debug', 'analyze_page_complete', 'Page analysis finished', {
+        host: window.location.hostname,
+        ms: Date.now() - analyzeStartedAt,
+    });
 
     return {
         scores: {

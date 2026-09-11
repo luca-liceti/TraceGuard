@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateFingerprintingScore, calculateTrackingScore, calculateWSS } from './scoring';
+import { calculateFingerprintingScore, calculateTrackingScore, calculateWSS, explainWSS } from './scoring';
 import type { ScoreBreakdown } from './types';
 
 const perfect: ScoreBreakdown = {
@@ -26,6 +26,45 @@ describe('calculateWSS', () => {
 
     it('clamps invalid scores and treats missing legacy fingerprinting as neutral', () => {
         expect(calculateWSS({ ...perfect, reputation: 150, tracking: -1, fingerprinting: undefined })).toBe(68);
+    });
+});
+
+/**
+ * `explainWSS` is what a diagnostics bundle reports, so it has to agree with the
+ * score the UI shows. These cases pin that agreement, including the policy
+ * weight redistribution, which is the one place the arithmetic gets subtle.
+ */
+describe('explainWSS', () => {
+    it('reports the weights and contributions behind a score', () => {
+        const explanation = explainWSS({ ...perfect, tracking: 0 });
+
+        expect(explanation.total).toBe(calculateWSS({ ...perfect, tracking: 0 }));
+        expect(explanation.policyFallback).toBe(false);
+        expect(explanation.weights.tracking).toBeCloseTo(0.25);
+        expect(explanation.contributions.tracking).toBe(0);
+        // Contributions sum to the total before rounding.
+        const sum = Object.values(explanation.contributions).reduce((total, value) => total + value, 0);
+        expect(sum).toBeCloseTo(explanation.total, 0);
+    });
+
+    it('flags the policy fallback and redistributes its weight', () => {
+        const explanation = explainWSS({ ...perfect, policy: 50 });
+
+        expect(explanation.policyFallback).toBe(true);
+        expect(explanation.weights.policy).toBe(0);
+        // The remaining weights scale up so the weights still sum to 100%.
+        const weightSum = Object.values(explanation.weights).reduce((total, value) => total + value, 0);
+        expect(weightSum).toBeCloseTo(1, 5);
+        expect(explanation.total).toBe(100);
+    });
+
+    it('agrees with calculateWSS for every combination of reputation and policy', () => {
+        for (const reputation of [0, 45, 100]) {
+            for (const policy of [50, 70, 100]) {
+                const breakdown = { ...perfect, reputation, tracking: 30, policy };
+                expect(calculateWSS(breakdown)).toBe(explainWSS(breakdown).total);
+            }
+        }
     });
 });
 

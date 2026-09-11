@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from '../../lib/utils';
+import { logEvent } from '../../lib/diagnostics';
 
 /**
  * =============================================================================
@@ -128,10 +129,19 @@ export async function refreshThreatFeed(): Promise<string[] | null> {
         if (!(await verifySignedFeed(data, THREAT_FEED_PUBLIC_KEY_HEX))) throw new Error('Invalid signature');
 
         await chrome.storage.local.set({ [LAST_ACCEPTED_KEY]: data.updated });
-        console.log(`[threat-feed] Accepted signed feed v${data.version} with ${data.domains.length} domains`);
+        logEvent('enrich', 'debug', 'threat_feed_accepted', 'Signed threat feed accepted', {
+            version: data.version,
+            domains: data.domains.length,
+            updated: data.updated,
+        });
         return data.domains;
     } catch (err) {
-        console.warn('[threat-feed] Refresh failed; keeping bundled snapshot:', err);
+        // Transient by design: offline, stale, forged, and replayed feeds all
+        // leave the bundled snapshot in effect, so this stays a warning in the
+        // session log rather than a durable error.
+        logEvent('enrich', 'warn', 'threat_feed_refresh_failed', 'Threat feed refresh failed, keeping bundled snapshot', {
+            error: String(err),
+        });
         return null;
     }
 }

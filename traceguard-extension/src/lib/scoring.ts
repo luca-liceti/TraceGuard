@@ -33,6 +33,7 @@
  */
 
 import { ScoreBreakdown } from './types';
+import { logEvent } from './diagnostics';
 
 export const WSS_WEIGHTS = {
     reputation: 0.25,
@@ -99,7 +100,13 @@ export function calculateTrackingScore(trackerCount: number): number {
 export function validateScore(score: number | undefined | null, fallback: number = 50): number {
     // Check if the score is unusable (undefined, null, or NaN)
     if (score === undefined || score === null || isNaN(score)) {
-        console.warn(`[Score Validation] Invalid score detected, using fallback: ${fallback}`);
+        // A missing or NaN score silently becomes a neutral fallback, which hides
+        // a detector that never returned a value. This used to be a console.warn
+        // nobody had open.
+        logEvent('scoring', 'warn', 'invalid_score_fallback', `Invalid score replaced with fallback ${fallback}`, {
+            received: String(score),
+            fallback,
+        });
         return fallback;
     }
 
@@ -115,7 +122,23 @@ export function validateScore(score: number | undefined | null, fallback: number
 // =============================================================================
 
 /**
- * Calculates the Website Safety Score (WSS) for a website.
+ * The audit trail behind a WSS: which weights were actually applied, what each
+ * detector contributed, and the final rounded total. Exported so a diagnostics
+ * bundle can explain a score instead of merely reporting it.
+ */
+export interface WssExplanation {
+    validated: ScoreBreakdown;
+    policyFallback: boolean;
+    weights: Record<keyof ScoreBreakdown, number>;
+    contributions: Record<keyof ScoreBreakdown, number>;
+    total: number;
+}
+
+/**
+ * Explains the Website Safety Score (WSS) for a website: the weights that were
+ * applied, each detector's contribution, and the final total. This holds the
+ * only implementation of the scoring math, so a score and its audit trail can
+ * never disagree.
  * 
  * This is the main function that takes scores from all 6 detectors and
  * combines them into a single overall score. Think of it like calculating
@@ -127,7 +150,7 @@ export function validateScore(score: number | undefined | null, fallback: number
  * @param breakdown - An object containing scores from each detector
  * @returns The overall Website Safety Score (0-100)
  */
-export function calculateWSS(breakdown: ScoreBreakdown): number {
+export function explainWSS(breakdown: ScoreBreakdown): WssExplanation {
     // STEP 1: Validate all input scores to ensure they're usable
     // This prevents weird bugs from invalid numbers
     const validatedBreakdown = {
@@ -188,5 +211,21 @@ export function calculateWSS(breakdown: ScoreBreakdown): number {
         contributions.policy;
 
     // Validate the final score (round it and ensure it's 0-100)
-    return validateScore(totalWeightedScore);
+    const total = validateScore(totalWeightedScore);
+
+    return {
+        validated: validatedBreakdown,
+        policyFallback: isPolicyFallback,
+        weights,
+        contributions,
+        total,
+    };
+}
+
+/**
+ * The Website Safety Score (0-100) for a website. Thin wrapper over
+ * `explainWSS`, which owns the math.
+ */
+export function calculateWSS(breakdown: ScoreBreakdown): number {
+    return explainWSS(breakdown).total;
 }

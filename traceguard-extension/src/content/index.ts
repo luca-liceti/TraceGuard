@@ -36,7 +36,7 @@ import { piiDetector } from './pii-detector';  // Monitors sensitive input field
 import { showPIIConfirmCard } from './pii-confirm';  // "Is this website safe?" popup
 import { showToast } from './toast';                 // In-page toast notifications
 import { isLocalUrl } from '../lib/utils'; // Helps identify local network addresses
-import { captureError, installGlobalErrorHandlers, logEvent, setDiagnosticContext } from '../lib/diagnostics';
+import { captureError, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
 
 
 // =============================================================================
@@ -71,6 +71,12 @@ async function runAnalysis(isInitialLoad: boolean) {
     try {
         // Respect the user's master on/off toggle, pause journaling when disabled.
         const { settings } = await chrome.storage.local.get<{ settings?: any }>('settings');
+        // Verbose logging and the session mirror are opt-in, so the setting has
+        // to be applied here too. Without it every debug event from the page half
+        // of the pipeline, including each detector's observations, is dropped, and
+        // nothing the content script sees can reach an exported bundle.
+        setDevMode(settings?.devMode === true);
+
         if (settings?.enabled === false) {
             logEvent('content', 'debug', 'analysis_skipped', 'Analysis skipped: extension disabled', { host: window.location.hostname });
             return;

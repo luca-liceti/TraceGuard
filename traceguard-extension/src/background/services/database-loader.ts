@@ -16,6 +16,34 @@
  * =============================================================================
  */
 
+import { captureError, logEvent } from '../../lib/diagnostics';
+
+/**
+ * Records a successful database load, including its entry count.
+ *
+ * A database that loads empty is as broken as one that fails to load: an empty
+ * EasyPrivacy set makes `isTrackerDomain` return false for every domain, so the
+ * tracker table reports "0 trackers" on a page full of them, and an empty cookie
+ * database pushes every cookie onto the heuristic path. Entry counts also catch
+ * a database that loads with a handful of rows and silently under-detects.
+ */
+function recordDatabaseLoaded(name: string, entries: number): void {
+    if (entries === 0) {
+        captureError('enrich', new Error(`${name} database loaded with zero entries`), 'database_empty', { database: name });
+        return;
+    }
+    logEvent('enrich', 'debug', 'database_loaded', `${name} loaded`, { database: name, entries });
+}
+
+/**
+ * Records a database that could not be read. These are bundled assets, so a
+ * failure here means the package is broken and detection is degraded; it used to
+ * reach a console nobody had open.
+ */
+function recordDatabaseFailed(name: string, error: unknown): void {
+    captureError('enrich', error, 'database_load_failed', { database: name });
+}
+
 interface TrackerRadarEntry {
     owner: string | null;
     displayName: string | null;
@@ -70,9 +98,9 @@ export async function getTrackerRadar(): Promise<Record<string, TrackerRadarEntr
         const response = await fetch(url);
         const data = await response.json();
         _trackerRadar = (data.default || data) as Record<string, TrackerRadarEntry>;
-        console.log(`[DatabaseLoader] Tracker Radar loaded: ${Object.keys(_trackerRadar).length} domains`);
+        recordDatabaseLoaded('tracker-radar', Object.keys(_trackerRadar).length);
     } catch (e) {
-        console.warn('[DatabaseLoader] Tracker Radar not found, using empty DB. Run: node scripts/build-databases.js');
+        recordDatabaseFailed('tracker-radar', e);
         _trackerRadar = {};
     }
     return _trackerRadar;
@@ -94,9 +122,9 @@ export async function getCookieDB(): Promise<CookieDatabase> {
             regex: new RegExp(w.regex, 'i'),
             entry: w.entry,
         }));
-        console.log(`[DatabaseLoader] Cookie DB loaded: ${Object.keys(_cookieDB.exact).length} exact, ${_cookieDB.wildcards.length} wildcards`);
+        recordDatabaseLoaded('cookie-db', Object.keys(_cookieDB.exact).length + _cookieDB.wildcards.length);
     } catch (e) {
-        console.warn('[DatabaseLoader] Cookie DB not found, using empty DB. Run: node scripts/build-databases.js');
+        recordDatabaseFailed('cookie-db', e);
         _cookieDB = { exact: {}, wildcards: [] };
         _compiledWildcards = [];
     }
@@ -115,9 +143,9 @@ export async function getEasyPrivacySet(): Promise<Set<string>> {
         const data = await response.json();
         const arr = (data.default || data) as string[];
         _easyPrivacySet = new Set(arr);
-        console.log(`[DatabaseLoader] EasyPrivacy loaded: ${_easyPrivacySet.size} domains`);
+        recordDatabaseLoaded('easyprivacy', _easyPrivacySet.size);
     } catch (e) {
-        console.warn('[DatabaseLoader] EasyPrivacy not found, using empty set. Run: node scripts/build-databases.js');
+        recordDatabaseFailed('easyprivacy', e);
         _easyPrivacySet = new Set();
     }
     return _easyPrivacySet;
@@ -134,9 +162,9 @@ export async function getDisconnectMap(): Promise<Record<string, DisconnectEntry
         const response = await fetch(url);
         const data = await response.json();
         _disconnectMap = (data.default || data) as Record<string, DisconnectEntry>;
-        console.log(`[DatabaseLoader] Disconnect loaded: ${Object.keys(_disconnectMap).length} domains`);
+        recordDatabaseLoaded('disconnect', Object.keys(_disconnectMap).length);
     } catch (e) {
-        console.warn('[DatabaseLoader] Disconnect not found, using empty map. Run: node scripts/build-databases.js');
+        recordDatabaseFailed('disconnect', e);
         _disconnectMap = {};
     }
     return _disconnectMap;
@@ -153,9 +181,9 @@ export async function getTosDRMap(): Promise<Record<string, any>> {
         const response = await fetch(url);
         const data = await response.json();
         _tosdrMap = (data.default || data) as Record<string, any>;
-        console.log(`[DatabaseLoader] ToS;DR loaded: ${Object.keys(_tosdrMap).length} domains`);
+        recordDatabaseLoaded('tosdr', Object.keys(_tosdrMap).length);
     } catch (e) {
-        console.warn('[DatabaseLoader] ToS;DR not found, using empty DB. Run: npm run build:tosdr');
+        recordDatabaseFailed('tosdr', e);
         _tosdrMap = {};
     }
     return _tosdrMap;

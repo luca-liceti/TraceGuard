@@ -2,6 +2,17 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.6.0
+
+**What's new**
+
+- Developer mode now records why every score came out the way it did. Each detector reports its raw observation, its score, and how long it took. Each page reports the weights and the per-detector contributions behind its final safety score, so the arithmetic can be checked from the log alone. Each database load reports its entry count, and each reputation check reports which layer decided the result and how many domains the blocklist holds.
+- Page-level detection now reaches the diagnostics bundle. The content script follows developer mode, so tracker counts, cookie counts, sensitive field types, fingerprinting techniques, and the ToS;DR source and grade are recorded. They were previously dropped, because the setting only applied to the background worker and the extension pages.
+
+**What was fixed**
+
+- Missing data is no longer silent. An unreadable or empty bundled database, a blocklist that failed to load, and a score that fell back to a neutral 50 all used to reach a developer console and nothing else. They are now recorded as failures, and a blocklist that never loaded shows up as `blacklistSize: 0` on every reputation check, which is the signal that reputation protection is effectively off.
+
 ## v1.5.1
 
 **What was fixed**

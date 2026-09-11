@@ -31,10 +31,10 @@
 
 import { storage, readBuffer, writeBuffer } from '../lib/storage';
 import { recordError } from '../lib/error-log';
-import { captureError, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
+import { captureError, enableSessionAccessForUntrustedContexts, installGlobalErrorHandlers, logEvent, setDevMode, setDiagnosticContext } from '../lib/diagnostics';
 import { z } from 'zod';
 import { loadBlacklist, checkReputation, refreshBlacklistFromRemote } from './services/reputation';
-import { calculateWSS, calculateTrackingScore } from '../lib/scoring';
+import { calculateWSS, calculateTrackingScore, explainWSS } from '../lib/scoring';
 import { SiteRiskData, ScoreHistoryEntry, EnrichedDetectionDetails, FingerprintingDetail, DetectorLogEntry, AppState } from '../lib/types';
 import { slimSiteData, resolveSyncCurrentSite } from '../lib/site-sync';
 import { checkTosDR } from './tosdr-api';
@@ -262,6 +262,9 @@ async function flushBufferedTelemetry() {
 // starts. Without this, a throw in any async path here disappears silently.
 installGlobalErrorHandlers();
 setDiagnosticContext('background');
+// The worker is the only context that can widen session storage access, which
+// the content script needs before any of its events can reach a copied bundle.
+enableSessionAccessForUntrustedContexts();
 
 // Initialize the network monitor right away to start observing web requests
 initNetworkMonitor();
@@ -1153,15 +1156,27 @@ async function handlePageAnalysis(message: any, sender: chrome.runtime.MessageSe
     // unobservable. Developer mode is now the only place to read them without
     // attaching a debugger. Note that a 100 here can mean a clean page or a
     // detector that threw and fell back to a neutral score.
+    const explanation = explainWSS(finalScores);
     logEvent('scoring', 'debug', 'page_analysis_complete', `${domain} scored ${wss}`, {
         host: domain,
         wss,
         isNewNavigation,
-        reputation: finalScores.reputation,
-        tracking: finalScores.tracking,
-        cookies: finalScores.cookies,
-        input: finalScores.input,
-        policy: finalScores.policy,
+        detectorScores: {
+            reputation: finalScores.reputation,
+            tracking: finalScores.tracking,
+            cookies: finalScores.cookies,
+            fingerprinting: finalScores.fingerprinting,
+            input: finalScores.input,
+            policy: finalScores.policy,
+        },
+        // The audit trail: which weights were applied (policy's weight is
+        // redistributed when ToS;DR had no rating) and what each detector
+        // actually contributed to the total.
+        policyFallback: explanation.policyFallback,
+        weights: explanation.weights,
+        contributions: Object.fromEntries(
+            Object.entries(explanation.contributions).map(([key, value]) => [key, Math.round(value * 10) / 10])
+        ),
     });
 
 }

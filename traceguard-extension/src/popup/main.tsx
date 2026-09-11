@@ -8,11 +8,14 @@ import { useSettings } from '@/lib/useStorage'
 import { redirectToDashboardIfFirstRun } from '@/lib/first-run'
 import '@/styles/globals.css'
 import '@/lib/i18n'
-import { installGlobalErrorHandlers, logEvent, setDiagnosticContext } from '@/lib/diagnostics'
+import { installGlobalErrorHandlers, logEvent, setDiagnosticContext, syncDevModeFromSettings } from '@/lib/diagnostics'
 
 // Capture uncaught errors thrown anywhere in the popup context.
 installGlobalErrorHandlers()
 setDiagnosticContext('popup')
+// The popup renders no settings UI of its own, so it has to read the developer
+// mode flag itself or every verbose event it records is dropped.
+void syncDevModeFromSettings()
 
 function Root() {
     const settings = useSettings();

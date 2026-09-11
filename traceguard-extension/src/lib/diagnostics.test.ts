@@ -16,6 +16,7 @@ import {
     refreshSessionEvents,
     setDevMode,
     setDiagnosticContext,
+    syncDevModeFromSettings,
 } from './diagnostics';
 
 /**
@@ -200,6 +201,40 @@ describe('diagnostics', () => {
 
         expect(text).toContain('copy me');
         expect(typeof copied).toBe('boolean');
+    });
+
+    it('applies the developer mode flag stored in settings', async () => {
+        // Every context has to read this itself. A context that skips it drops
+        // its own verbose events, which is how the content script used to lose
+        // all of its detector output.
+        await chrome.storage.local.set({ settings: { devMode: true } });
+
+        await syncDevModeFromSettings();
+
+        expect(isDevMode()).toBe(true);
+    });
+
+    it('leaves developer mode off when settings say so', async () => {
+        await chrome.storage.local.set({ settings: { devMode: false } });
+
+        await syncDevModeFromSettings();
+
+        expect(isDevMode()).toBe(false);
+    });
+
+    it('says so in the report when the buffer drops older events', async () => {
+        setDevMode(true);
+        for (let index = 0; index < 510; index += 1) {
+            logEvent('background', 'debug', `event_${index}`, 'filler');
+        }
+
+        const report = formatDiagnosticsReport();
+
+        // An empty start to a timeline must never be mistaken for "nothing
+        // happened", so the gap is stated rather than left to inference.
+        expect(report).toMatch(/older events dropped: \d+/);
+        expect(report).toContain('this timeline has a gap at the start');
+        expect(getSessionEvents()).toHaveLength(500);
     });
 
     it('normalizes thrown values that are not Error instances', () => {

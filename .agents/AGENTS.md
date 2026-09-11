@@ -30,7 +30,16 @@
 - Developer mode must make every number explicable. When you add or change a detector, a score, a database, or a service lookup, record its inputs and its fallback, not just the output: `detector_ran` per detector with raw counts and duration, `page_analysis_complete` with the `explainWSS` weights and contributions, `database_loaded` with entry counts, `reputation_checked` with the deciding layer and `blacklistSize`.
 - A degraded component must be visible even when it produces a plausible number. An unloaded blocklist (`blacklistSize: 0`) means every site reads as clean, an empty bundled database silently detects nothing, and a neutral fallback score hides a detector that never returned. Record each through `captureError` or an explicit field (`database_empty`, `database_load_failed`, `blacklist_load_failed`, `invalid_score_fallback`).
 - Keep the scoring math in `explainWSS` in `src/lib/scoring.ts`. Never reimplement the weights elsewhere; `calculateWSS` wraps it so the score and its audit trail cannot disagree.
-- Every context that logs syncs developer mode itself. The content script calls `setDevMode(settings.devMode)` where it reads settings, and the worker calls `enableSessionAccessForUntrustedContexts()` so page-level events can reach session storage at all.
+- Every context that logs syncs developer mode itself. Each entry point calls `syncDevModeFromSettings()` on load, the content script re-syncs where it reads settings for an analysis, and the worker also re-syncs from `chrome.storage.onChanged`. A context that only reads the flag at startup drops its own verbose events until Chrome restarts it, which looks identical to "nothing is happening".
+- The worker calls `enableSessionAccessForUntrustedContexts()` so page-level events can reach session storage at all.
+- When the event buffer drops older events, `formatDiagnosticsReport` states that it did and how many. A timeline with a hidden gap must never read as "nothing happened".
+
+## Communication
+
+- Explain work in plain language, pitched at an entry-level developer. Lead with what the change does for the user, then how it works.
+- Define a term the first time it appears ("the worker, the part that runs with no window"). Avoid unexplained internal shorthand.
+- Keep the precise details. Simple is not vague: name the file, the function, and the exact behaviour, then describe it in words a new developer can follow.
+- When something is only partly done, say which parts are done and which are not, rather than describing it as finished.
 
 ## Keeping these rules current
 

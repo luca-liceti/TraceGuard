@@ -4,11 +4,12 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import App from './App'
 import '@/styles/globals.css'
 import '@/lib/i18n'
-import { installGlobalErrorHandlers, setDiagnosticContext } from '@/lib/diagnostics'
+import { installGlobalErrorHandlers, setDiagnosticContext, syncDevModeFromSettings } from '@/lib/diagnostics'
 
 // Capture uncaught errors thrown anywhere in the dashboard context.
 installGlobalErrorHandlers()
 setDiagnosticContext('dashboard')
+void syncDevModeFromSettings()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

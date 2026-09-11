@@ -2,6 +2,14 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.1
+
+**What was fixed**
+
+- Turning on Developer mode now reaches the background worker straight away. It used to read the setting only when it started, so the most useful lines (page scores, reputation checks, personal-information decisions) could be missing from the log until Chrome happened to restart the worker.
+- The popup, side panel, and dashboard each read the Developer mode setting for themselves. The popup never did, so anything it recorded at verbose level was thrown away, and it never contributed to the shared log.
+- The copied diagnostics bundle now says when the log filled up and older events were dropped, and how many. A timeline that starts abruptly used to look like nothing happened, when in fact the beginning had been discarded.
+
 ## v1.7.0
 
 **What's new**

@@ -283,6 +283,23 @@ storage.getSettings().then((settings) => {
     captureError('startup', error, 'settings_load_failed');
 });
 
+// Settings can change while this worker is already running, most importantly the
+// developer mode toggle. Without this listener the worker keeps whatever it read
+// at startup, so the background half of the pipeline (page scores, reputation
+// checks, enrichment, PII decisions) stays silent until Chrome happens to
+// restart it, which looks exactly like "nothing is happening".
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes.settings) return;
+    const next = changes.settings.newValue as { devMode?: boolean; enabled?: boolean } | undefined;
+    // Apply the flag first so this confirmation event is actually captured.
+    setDevMode(next?.devMode === true);
+    setNetworkMonitorEnabled(next?.enabled !== false);
+    logEvent('startup', 'debug', 'settings_synced', 'Settings changed while the worker was running', {
+        devMode: next?.devMode === true,
+        enabled: next?.enabled !== false,
+    });
+});
+
 // =============================================================================
 // EXTENSION LIFECYCLE EVENTS
 // These functions run when the extension is installed or the browser opens

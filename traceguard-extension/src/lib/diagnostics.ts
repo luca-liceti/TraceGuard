@@ -90,6 +90,10 @@ const MAX_FIELD_CHARS = 400;
 
 let devMode = false;
 let events: DiagnosticEvent[] = [];
+// Counts events that fell off the back of the buffer. Without this, a bundle
+// with an empty start is ambiguous: it could mean "nothing happened yet" or
+// "the beginning was thrown away", which is exactly the wrong thing to guess at.
+let droppedEvents = 0;
 let handlersInstalled = false;
 // Which context this instance of the module lives in. Every context installs
 // the global handlers, so an uncaught error has to say where it came from.
@@ -209,6 +213,25 @@ export function isDevMode(): boolean {
     return devMode;
 }
 
+/**
+ * Reads the developer mode flag out of settings and applies it here.
+ *
+ * Every context needs this at startup, not just the ones that render the
+ * settings modal. A context that never applies the flag drops its own debug and
+ * info events silently, because the capture gate assumes developer mode is off.
+ */
+export async function syncDevModeFromSettings(): Promise<void> {
+    try {
+        const stored = await chrome.storage.local.get('settings');
+        const settings = stored?.settings as { devMode?: boolean } | undefined;
+        setDevMode(settings?.devMode === true);
+    } catch (error) {
+        logEvent('startup', 'warn', 'dev_mode_sync_failed', 'Could not read the developer mode setting', {
+            error: String(error),
+        });
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Event capture
 // -----------------------------------------------------------------------------
@@ -237,7 +260,10 @@ export function logEvent(
     };
 
     events.push(entry);
-    if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
+    if (events.length > MAX_EVENTS) {
+        droppedEvents += events.length - MAX_EVENTS;
+        events = events.slice(-MAX_EVENTS);
+    }
     notify();
 
     // Mirror into session storage only in developer mode. Errors are already
@@ -354,9 +380,9 @@ function mergeEvents(a: DiagnosticEvent[], b: DiagnosticEvent[]): DiagnosticEven
     const byId = new Map<string, DiagnosticEvent>();
     for (const entry of a) byId.set(entry.id, entry);
     for (const entry of b) byId.set(entry.id, entry);
-    return Array.from(byId.values())
-        .sort((x, y) => x.timestamp - y.timestamp)
-        .slice(-MAX_EVENTS);
+    const merged = Array.from(byId.values()).sort((x, y) => x.timestamp - y.timestamp);
+    if (merged.length > MAX_EVENTS) droppedEvents += merged.length - MAX_EVENTS;
+    return merged.slice(-MAX_EVENTS);
 }
 
 /**
@@ -549,6 +575,7 @@ export function formatDiagnosticsReport(): string {
         '# TraceGuard diagnostics',
         '',
         ...Object.entries(env).map(([key, value]) => `- ${key}: ${value}`),
+        ...(droppedEvents > 0 ? [`- older events dropped: ${droppedEvents}`] : []),
         '',
         `## Errors (${errors.length})`,
         '',
@@ -568,6 +595,12 @@ export function formatDiagnosticsReport(): string {
     }
 
     lines.push(`## Timeline (${events.length} events)`, '');
+    if (droppedEvents > 0) {
+        lines.push(
+            `> The buffer keeps the most recent ${MAX_EVENTS} events, so ${droppedEvents} older events were dropped and this timeline has a gap at the start.`,
+            ''
+        );
+    }
     if (events.length === 0) {
         lines.push('No events recorded. Turn on Developer mode to capture verbose diagnostics.');
     } else {
@@ -609,6 +642,7 @@ export function __resetDiagnosticsForTests(): void {
     installedTarget = null;
     installedHandlers = null;
     events = [];
+    droppedEvents = 0;
     devMode = false;
     handlersInstalled = false;
     if (persistTimer) {

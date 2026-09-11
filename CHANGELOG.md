@@ -2,6 +2,14 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.2
+
+**What was fixed**
+
+- The release workflow no longer substitutes the pushed tag name into a shell command. A tag containing shell syntax could have run arbitrary commands in the job that holds the Chrome Web Store signing credentials.
+- Every dependency advisory is resolved (browserslist, js-yaml, postcss-selector-parser, and vitest with its bundled mocker), so `npm audit --audit-level=high` passes and the CI security gate is green again.
+- Test coverage is now measured across the whole codebase, including the background worker, the content script, and the user interface. It previously counted only `src/lib` and the detectors, so the headline number described the least risky part of the extension.
+
 ## v1.7.1
 
 **What was fixed**

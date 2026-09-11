@@ -22,10 +22,15 @@ jobs:
 
     - name: Verify tag matches package version
       working-directory: ./traceguard-extension
+      env:
+        # The ref is passed through the environment instead of being interpolated
+        # into the shell string. A crafted tag name could otherwise break out of
+        # the quotes and run commands in this job, which holds signing secrets.
+        TAG_NAME: ${{ github.ref_name }}
       run: |
         pkg="v$(node -p "require('./package.json').version")"
-        if [ "${{ github.ref_name }}" != "$pkg" ]; then
-          echo "Tag ${{ github.ref_name }} does not match package version $pkg" >&2
+        if [ "$TAG_NAME" != "$pkg" ]; then
+          echo "Tag $TAG_NAME does not match package version $pkg" >&2
           exit 1
         fi
 
@@ -77,9 +82,11 @@ jobs:
       
     - name: Package Extension
       working-directory: ./traceguard-extension
+      env:
+        TAG_NAME: ${{ github.ref_name }}
       run: |
         cd dist
-        zip -r ../traceguard-extension-${{ github.ref_name }}.zip ./*
+        zip -r "../traceguard-extension-${TAG_NAME}.zip" ./*
         
     - name: Extract release notes
       run: awk '/^## /{n++} n==1' CHANGELOG.md > release-notes.md

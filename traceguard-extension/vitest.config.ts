@@ -36,15 +36,22 @@ export default defineConfig({
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],
-            include: ['src/lib/**/*.ts', 'src/content/detectors/**/*.ts'],
+            // Measure everything that ships. The background worker, the content
+            // script, and every UI component were previously excluded, so the
+            // headline number described the least risky half of the codebase.
+            include: ['src/**/*.{ts,tsx}'],
+            exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/vite-env.d.ts'],
             // Floor, not a target: CI fails if coverage regresses below today's
-            // level. Raise these as the untested background/content paths gain
-            // coverage.
+            // level. These sit just under the measured values for the widened
+            // scope (statements 33.0, branches 20.9, functions 22.0, lines 33.8),
+            // which are much lower than the old lib-only number because the
+            // background worker, the content script, and the UI components are
+            // now measured too. Raise them as those paths gain tests.
             thresholds: {
-                statements: 45,
-                branches: 35,
-                functions: 40,
-                lines: 45,
+                statements: 32,
+                branches: 20,
+                functions: 21,
+                lines: 33,
             },
         },
     },

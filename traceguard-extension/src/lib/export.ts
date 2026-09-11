@@ -16,6 +16,8 @@
  * =============================================================================
  */
 
+import { z } from 'zod';
+
 import {
     decryptData,
     deriveKeyFromPassword,
@@ -165,7 +167,40 @@ const IMPORTABLE_VAULT_KEYS = [
     'notifications',
 ] as const;
 
-const IMPORTABLE_PLAIN_KEYS = ['settings', 'state', 'tosdr_cache'] as const;
+/** Largest backup the importer will read into memory, in characters. */
+export const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
+
+/**
+ * A backup is user-supplied JSON, so each restorable plaintext key is validated
+ * before it reaches storage. Without this a malformed file could write a
+ * non-array allow list, an out-of-range threshold, or a settings object the rest
+ * of the extension cannot read.
+ */
+const UserSettingsSchema = z.object({
+    enabled: z.boolean().optional(),
+    notifications: z.boolean().optional(),
+    theme: z.enum(['light', 'dark', 'system']).optional(),
+    whitelist: z.array(z.string().min(1).max(255)).max(5000).optional(),
+    blacklist: z.array(z.string().min(1).max(255)).max(5000).optional(),
+    notificationLevel: z.enum(['silent', 'balanced', 'aggressive']).optional(),
+    wssThreshold: z.number().finite().min(0).max(100).optional(),
+    logRetentionDays: z.number().finite().min(0).max(3650).optional(),
+    enablePIIDetection: z.boolean().optional(),
+    displayMode: z.enum(['popup', 'sidebar']).optional(),
+    autoLockTimeout: z.number().finite().min(-1).max(10080).optional(),
+    databaseRefreshDays: z.union([z.literal(1), z.literal(3), z.literal(7), z.literal(14), z.literal(30)]).optional(),
+    enableCloudTosdr: z.boolean().optional(),
+    devMode: z.boolean().optional(),
+}).passthrough();
+
+const AppStateSchema = z.object({
+    ups: z.number().finite().min(0).max(100).optional(),
+    sitesAnalyzed: z.number().finite().min(0).optional(),
+    trackersDetected: z.number().finite().min(0).optional(),
+    piiEventsCount: z.number().finite().min(0).optional(),
+    safeVisitStreak: z.number().finite().min(0).optional(),
+    currentSite: z.unknown().optional(),
+}).passthrough();
 
 /**
  * Restores a TraceGuard backup (plaintext or password-protected).
@@ -177,6 +212,10 @@ const IMPORTABLE_PLAIN_KEYS = ['settings', 'state', 'tosdr_cache'] as const;
  * @returns The list of storage keys that were restored.
  */
 export async function importAllData(text: string, password: string | null): Promise<string[]> {
+    if (text.length > MAX_BACKUP_BYTES) {
+        throw new Error('This backup is too large to import (50 MB limit).');
+    }
+
     let parsed: unknown;
     try {
         parsed = JSON.parse(text);
@@ -208,22 +247,51 @@ export async function importAllData(text: string, password: string | null): Prom
         throw new Error('This file is not a TraceGuard backup.');
     }
 
+    // Validate everything before writing anything, so a bad file cannot leave a
+    // half-restored backup behind.
+    const vault: Array<[string, unknown]> = [];
+    for (const k of IMPORTABLE_VAULT_KEYS) {
+        if (!(k in data)) continue;
+        const value = data[k];
+        const isDomainMap = k === 'siteCache' || k === 'crossSiteExposure';
+        const valid = isDomainMap
+            ? typeof value === 'object' && value !== null && !Array.isArray(value)
+            : Array.isArray(value);
+        if (!valid) throw new Error(`This backup's "${k}" data is not valid.`);
+        vault.push([k, value]);
+    }
+
+    const plain: Array<[string, unknown]> = [];
+    if ('settings' in data) {
+        const result = UserSettingsSchema.safeParse(data.settings);
+        if (!result.success) throw new Error('This backup contains invalid settings.');
+        plain.push(['settings', result.data]);
+    }
+    if ('state' in data) {
+        const result = AppStateSchema.safeParse(data.state);
+        if (!result.success) throw new Error('This backup contains an invalid app state.');
+        plain.push(['state', result.data]);
+    }
+    if ('tosdr_cache' in data) {
+        const value = data.tosdr_cache;
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+            throw new Error('This backup contains an invalid rating cache.');
+        }
+        plain.push(['tosdr_cache', value]);
+    }
+
     const session = await chrome.storage.session.get<{ cryptoKeyHex?: string }>('cryptoKeyHex');
     if (!session.cryptoKeyHex) throw new Error('Unlock your vault before importing a backup.');
     const key = await importKey(session.cryptoKeyHex);
 
     const restored: string[] = [];
-    for (const k of IMPORTABLE_VAULT_KEYS) {
-        if (k in data) {
-            await chrome.storage.local.set({ [k]: await encryptData(key, data[k]) });
-            restored.push(k);
-        }
+    for (const [k, value] of vault) {
+        await chrome.storage.local.set({ [k]: await encryptData(key, value) });
+        restored.push(k);
     }
-    for (const k of IMPORTABLE_PLAIN_KEYS) {
-        if (k in data) {
-            await chrome.storage.local.set({ [k]: data[k] });
-            restored.push(k);
-        }
+    for (const [k, value] of plain) {
+        await chrome.storage.local.set({ [k]: value });
+        restored.push(k);
     }
 
     return restored;

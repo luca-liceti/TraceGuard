@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-import { importAllData } from "@/lib/export"
+import { importAllData, MAX_BACKUP_BYTES } from "@/lib/export"
 
 export function ImportDataDialog({
     open,
@@ -42,6 +42,11 @@ export function ImportDataDialog({
         if (!file) return
         setError("")
         setFileName(file.name)
+        if (file.size > MAX_BACKUP_BYTES) {
+            setError(t("This backup is too large to import (50 MB limit)."))
+            if (fileInputRef.current) fileInputRef.current.value = ""
+            return
+        }
         setImporting(true)
         try {
             const text = await file.text()

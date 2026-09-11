@@ -2,6 +2,13 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.7.4
+
+**What was fixed**
+
+- Importing a backup now checks the file before writing anything. A malformed file can no longer leave half-restored settings, a non-list allow list, or an app state the rest of the extension cannot read.
+- Backups larger than 50 MB are rejected with a clear message instead of being read into memory. The extension requests unlimited local storage, so a crafted file had no upper bound before.
+
 ## v1.7.3
 
 **What was fixed**

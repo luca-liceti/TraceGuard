@@ -56,6 +56,7 @@
 
 ## Releasing
 
+- Every release must include a `CHANGELOG.md` entry at the top of the file (newest first) with a **What's new** and/or **What was fixed** section describing the user-facing changes. Write it before tagging: the Release workflow copies that top section into the GitHub release body, so a tag without an entry ships an empty release.
 - Release by tagging: bump the version with `npm version patch|minor|major`, then `git push && git push --tags`.
 - The Release workflow builds `traceguard-extension-v<tag>.zip`, creates a GitHub release, and, if store credentials are configured (secrets `CHROME_WEB_STORE_CLIENT_ID`, `CHROME_WEB_STORE_CLIENT_SECRET`, `CHROME_WEB_STORE_REFRESH_TOKEN` and variable `EXTENSION_ID`), auto-uploads the ZIP to the Chrome Web Store.
 - Store uploads are upload-only (submitted for review); publishing happens manually in the Chrome Web Store dashboard.

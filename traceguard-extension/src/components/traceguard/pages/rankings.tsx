@@ -72,15 +72,15 @@ const DETECTOR_LABELS: Record<string, string> = {
   policy:      "Privacy Policy",
 }
 
-// WSS bucket color palette (mirrors the safety badge semantics used
-// elsewhere in the app: excellent/good = success, fair = warning,
-// poor = alert, critical = destructive)
-const WSS_COLORS: Record<string, string> = {
-  Critical:  "var(--destructive)",
-  Poor:      "var(--alert)",
-  Fair:      "var(--warning)",
-  Good:      "var(--success)",
-  Excellent: "var(--success)",
+// WSS bucket opacity palette – matching the rest of the page's
+// grayscale / primary-only visual style. Excellent gets full opacity,
+// Critical gets the lightest shade.
+const WSS_OPACITIES: Record<string, number> = {
+  Excellent: 1,
+  Good:      0.8,
+  Fair:      0.6,
+  Poor:      0.4,
+  Critical:  0.2,
 }
 
 // PII sensitivity colors
@@ -311,7 +311,8 @@ export default function RankingsPage() {
       category,
       count,
       pct: total > 0 ? Math.round((count / total) * 100) : 0,
-      fill: WSS_COLORS[category],
+      fill: "var(--primary)",
+      opacity: WSS_OPACITIES[category] ?? 1,
     }))
   }, [sites])
 
@@ -678,7 +679,7 @@ export default function RankingsPage() {
                   />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {wssData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                      <Cell key={`cell-${index}`} fill="var(--primary)" fillOpacity={entry.opacity} />
                     ))}
                     <LabelList
                       dataKey="count"

@@ -93,7 +93,7 @@
     "eslint-plugin-react-refresh": "^0.5.4",
     "happy-dom": "^20.0.11",
     "typescript": "^5.6.3",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "overrides": {
     "browserslist": "^4.28.9",

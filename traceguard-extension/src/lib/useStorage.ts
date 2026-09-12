@@ -25,6 +25,9 @@
  * 
  * useActivityLogs() - Get PII detection events
  *   Returns: Array of PII detection entries
+ *
+ * useExposureReport() - Get the aggregated footprint ledger
+ *   Returns: { report, isLoading } - what you handed over, and who saw you
  * 
  * useDetectorLogs() - Get detector scan logs
  *   Returns: Array of detector log entries for each site visit
@@ -48,10 +51,12 @@
  * =============================================================================
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './storage';
-import { AppState, UserSettings, SiteRiskData } from './types';
+import { AppState, UserSettings, SiteRiskData, CrossSiteExposure, PIIDetectionEvent } from './types';
+import { buildExposureReport, ExposureReport } from './exposure';
 import { importKey, decryptData } from './crypto';
+import { logEvent } from './diagnostics';
 
 // Helper to decrypt data if it was encrypted
 async function decryptIfNeeded(data: any): Promise<any> {
@@ -62,7 +67,7 @@ async function decryptIfNeeded(data: any): Promise<any> {
         const key = await importKey(session.cryptoKeyHex);
         return await decryptData(key, data);
     } catch (e) {
-        console.error("Decryption failed in hook:", e);
+        logEvent('storage', 'warn', 'vault_decrypt_failed', e instanceof Error ? e.message : String(e));
         return null;
     }
 }
@@ -222,6 +227,90 @@ export function useActivityLogs() {
     }, []);
 
     return logs;
+}
+
+// =============================================================================
+// FOOTPRINT LEDGER HOOK
+// Reads the three stored inputs and aggregates them into the ledger.
+// =============================================================================
+
+/** Narrow decrypted storage into the shapes the aggregation expects. */
+function asObject<T extends object>(value: any): T {
+    return (value && typeof value === 'object' && !Array.isArray(value)) ? value as T : {} as T;
+}
+
+function asArray<T>(value: any): T[] {
+    return Array.isArray(value) ? value as T[] : [];
+}
+
+/**
+ * Hook to access the footprint ledger.
+ *
+ * Reads `crossSiteExposure`, `piiDetections` and `siteCache` (each may be
+ * encrypted), decrypts them, and aggregates them with `buildExposureReport`.
+ * The aggregation itself is pure, so all of the logic worth testing lives in
+ * `exposure.ts` rather than here.
+ *
+ * @returns { report, isLoading }
+ */
+export function useExposureReport(): { report: ExposureReport; isLoading: boolean } {
+    const [exposure, setExposure] = useState<CrossSiteExposure>({});
+    const [piiEvents, setPiiEvents] = useState<PIIDetectionEvent[]>([]);
+    const [siteCache, setSiteCache] = useState<Record<string, SiteRiskData>>({});
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const load = async (raw: Record<string, any>) => {
+            const [decryptedExposure, decryptedPii, decryptedCache] = await Promise.all([
+                decryptIfNeeded(raw.crossSiteExposure),
+                decryptIfNeeded(raw.piiDetections),
+                decryptIfNeeded(raw.siteCache),
+            ]);
+            if (!isMounted) return;
+            setExposure(asObject<CrossSiteExposure>(decryptedExposure));
+            setPiiEvents(asArray<PIIDetectionEvent>(decryptedPii));
+            setSiteCache(asObject<Record<string, SiteRiskData>>(decryptedCache));
+            setIsLoading(false);
+        };
+
+        chrome.storage.local
+            .get(['crossSiteExposure', 'piiDetections', 'siteCache'])
+            .then(load)
+            .catch((error) => {
+                // A read failure must not leave the page spinning forever; show an
+                // empty ledger instead. The deterministic view is the product, and
+                // it is honest about there being nothing to show.
+                logEvent('storage', 'warn', 'exposure_read_failed', error instanceof Error ? error.message : String(error));
+                if (isMounted) setIsLoading(false);
+            });
+
+        const listener = async (
+            changes: { [key: string]: chrome.storage.StorageChange },
+            areaName: string
+        ) => {
+            if (areaName !== 'local') return;
+            const touched = ['crossSiteExposure', 'piiDetections', 'siteCache'];
+            if (!touched.some(k => changes[k])) return;
+            await load(await chrome.storage.local.get(touched));
+        };
+
+        chrome.storage.onChanged.addListener(listener);
+        return () => {
+            isMounted = false;
+            chrome.storage.onChanged.removeListener(listener);
+        };
+    }, []);
+
+    // Aggregating on every render of a large site cache would be wasteful; the
+    // inputs only change when the storage listener above fires.
+    const report = useMemo(
+        () => buildExposureReport({ exposure, piiEvents, siteCache }),
+        [exposure, piiEvents, siteCache]
+    );
+
+    return { report, isLoading };
 }
 
 export function useDetectorLogs() {

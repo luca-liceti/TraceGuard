@@ -11,6 +11,7 @@ import {
   HardDrive,
   Info,
   LayoutGrid,
+  Footprints,
   Settings,
   MonitorSmartphone,
   Lock,
@@ -270,6 +271,10 @@ export function SearchCommand() {
             <CommandItem value="overview dashboard home" onSelect={() => goTo("/overview")}>
               <LayoutGrid className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
               <span>{t("Overview")}</span>
+            </CommandItem>
+            <CommandItem value="footprint exposure data sites trackers what you shared" onSelect={() => goTo("/exposure")}>
+              <Footprints className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span>{t("Your Footprint")}</span>
             </CommandItem>
             <CommandItem value="rankings stats sites analysis" onSelect={() => goTo("/rankings")}>
               <BarChart2 className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import {
   LayoutGrid,
   BarChart2,
+  Footprints,
   ShieldAlert,
   SlidersHorizontal,
   ShieldUser,
@@ -31,6 +32,12 @@ const data = {
       title: "Overview",
       url: "#/overview",
       icon: LayoutGrid,
+      isActive: false,
+    },
+    {
+      title: "Your Footprint",
+      url: "#/exposure",
+      icon: Footprints,
       isActive: false,
     },
     {

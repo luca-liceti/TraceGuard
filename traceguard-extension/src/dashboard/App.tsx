@@ -14,6 +14,7 @@ import { resilientLazy } from "@/lib/resilient-lazy"
 const OverviewPage = resilientLazy(() => import("@/components/traceguard/pages/overview"))
 const HelpPage = resilientLazy(() => import("@/components/traceguard/pages/help"))
 const RankingsPage = resilientLazy(() => import("@/components/traceguard/pages/rankings"))
+const ExposurePage = resilientLazy(() => import("@/components/traceguard/pages/exposure"))
 const PrivacyPolicyPage = resilientLazy(() => import("@/components/traceguard/pages/privacy-policy"))
 import { SettingsProvider, useSettingsModal } from "@/components/traceguard/settings-context"
 import { SettingsModal } from "@/components/traceguard/settings-modal"
@@ -93,6 +94,9 @@ function AppContent() {
 
                         {/* Legacy dashboard route - redirect to overview */}
                         <Route path="/dashboard" element={<Navigate to="/overview" replace />} />
+
+                        {/* Footprint ledger */}
+                        <Route path="/exposure" element={<PageWrapper><ExposurePage /></PageWrapper>} />
 
                         {/* Management Pages */}
                         <Route path="/rankings" element={<PageWrapper><RankingsPage /></PageWrapper>} />

@@ -2,6 +2,16 @@
 
 Each release ships with **What's new** and/or **What was fixed** describing user-facing changes. The release workflow pulls the top section of this file into the GitHub release body.
 
+## v1.8.0
+
+**What's new**
+
+- A new **Your Footprint** page in the dashboard. It turns the data TraceGuard already stores on your device into two lists about you rather than about the websites you visit:
+  - **What you have handed over** lists each kind of personal data you have entered (email, password, card, and so on), which sites received it, and when it was last seen. Sites you visited only once, have not visited in a long time, or that scored poorly at the moment you entered your data are marked as ones you may have forgotten.
+  - **Who has seen you** lists the tracker companies whose code loaded on the sites you visited, ranked by how many of your sites each one covered, so a company on dozens of them stands out from one on a single page.
+- The page is read-only: it reports what was recorded and gives you nothing to click yet. It never sees the values you type, only the type of field.
+- No new permissions are requested, nothing leaves your device, and the page is translated into Spanish, French, and German like the rest of the interface.
+
 ## v1.7.10
 
 **What was fixed**
